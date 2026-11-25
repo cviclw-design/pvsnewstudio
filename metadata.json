@@ -1,0 +1,6 @@
+{
+  "name": "CLW PVC Calculation System",
+  "description": "Centralized Price Variation Calculation (PVC) engine for Indian Railways tenders, IEEMA & IGBT Propulsion System formulas, bulk Excel calculations, history, and administration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

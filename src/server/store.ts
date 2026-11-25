@@ -1,0 +1,664 @@
+import fs from 'fs';
+import bcrypt from 'bcryptjs';
+import {
+  AuditLogRecord,
+  ItemIndexRecord,
+  ItemRecord,
+  Pagination,
+  PVCResultRecord,
+  TenderMasterRecord,
+  TenderVendorRecord,
+  UserRecord,
+} from './types.js';
+
+const SNAPSHOT_PATH = '/tmp/pvc_app_store.json';
+
+interface StoreState {
+  nextIds: {
+    users: number;
+    items: number;
+    itemIndices: number;
+    tenders: number;
+    tenderVendors: number;
+    pvcResults: number;
+    auditLogs: number;
+  };
+  users: UserRecord[];
+  items: ItemRecord[];
+  itemIndices: ItemIndexRecord[];
+  tenders: TenderMasterRecord[];
+  tenderVendors: TenderVendorRecord[];
+  pvcResults: PVCResultRecord[];
+  auditLogs: AuditLogRecord[];
+}
+
+function generateMonthlyIndices(): ItemIndexRecord[] {
+  const rows: ItemIndexRecord[] = [];
+  let id = 1;
+
+  // Deterministic realistic monthly index progression from Jan 2022 to Dec 2026
+  // Item 1: IGBT Propulsion System (C, AL, FE, IM, W, D, ER_EUR, ER_USD, ER_JPY)
+  // Item 2: 3-Phase Traction Motor (C, AL, FE, IM, W)
+  // Item 3: Main Traction Transformer (C, AL, FE, IM, W)
+  for (let year = 2022; year <= 2026; year++) {
+    for (let month = 1; month <= 12; month++) {
+      const idxOffset = (year - 2022) * 12 + (month - 1);
+      const monthStr = `${year}-${String(month).padStart(2, '0')}-01`;
+      const wave = Math.sin(idxOffset * 0.35);
+
+      const C = Number((740 + idxOffset * 3.8 + wave * 14).toFixed(2));
+      const AL = Number((235 + idxOffset * 1.4 + wave * 6).toFixed(2));
+      const FE = Number((145 + idxOffset * 0.9 + Math.cos(idxOffset * 0.3) * 4).toFixed(2));
+      const IM = Number((132 + idxOffset * 0.65 + wave * 2.5).toFixed(2));
+      const W = Number((128 + idxOffset * 0.85).toFixed(2));
+      const D = year >= 2024 ? 7.5 : 10.0;
+      const ER_EUR = Number((84.5 + idxOffset * 0.16 + wave * 1.1).toFixed(2));
+      const ER_USD = Number((77.2 + idxOffset * 0.15 + Math.cos(idxOffset * 0.25) * 0.7).toFixed(2));
+      const ER_JPY = Number((0.62 - idxOffset * 0.001 + wave * 0.01).toFixed(4));
+
+      // Item 1: IGBT Propulsion System
+      rows.push({
+        id: id++,
+        item_id: 1,
+        month: monthStr,
+        indices_json: JSON.stringify({ C, AL, FE, IM, W, D, ER_EUR, ER_USD, ER_JPY }),
+      });
+
+      // Item 2: 3-Phase Traction Motor
+      rows.push({
+        id: id++,
+        item_id: 2,
+        month: monthStr,
+        indices_json: JSON.stringify({ C, AL, FE, IM, W }),
+      });
+
+      // Item 3: Main Traction Transformer
+      rows.push({
+        id: id++,
+        item_id: 3,
+        month: monthStr,
+        indices_json: JSON.stringify({ C, AL, FE, IM, W }),
+      });
+    }
+  }
+  return rows;
+}
+
+function createInitialState(): StoreState {
+  const adminHash = bcrypt.hashSync('admin123', 10);
+  const userHash = bcrypt.hashSync('user123', 10);
+
+  const users: UserRecord[] = [
+    {
+      id: 1,
+      username: 'admin',
+      full_name: 'CLW Administrator',
+      email: 'admin@clw.indianrailways.gov.in',
+      contact_no: '9163340563',
+      designation: 'Senior Accounts Officer',
+      control_no: 'CLW-001',
+      password_hash: adminHash,
+      is_admin: true,
+    },
+    {
+      id: 2,
+      username: 'operator',
+      full_name: 'PVC Bill Clerk',
+      email: 'operator@clw.indianrailways.gov.in',
+      contact_no: '9000000001',
+      designation: 'Accounts Assistant',
+      control_no: 'CLW-002',
+      password_hash: userHash,
+      is_admin: false,
+    },
+  ];
+
+  const items: ItemRecord[] = [
+    {
+      id: 1,
+      name: 'IGBT Propulsion System',
+      code: '29180010',
+      description: '3-Phase IGBT Based Propulsion Equipment for WAG-9 / WAP-7 Locomotives',
+      pvc_formula_code: 'IGBTPROPULSIONSYSTEM',
+      weights_json: JSON.stringify({ FIXED: 16, C: 26, AL: 13, FE: 18, IM: 9, W: 18 }),
+      extra_fields_json: '[]',
+    },
+    {
+      id: 2,
+      name: '3-Phase Traction Motor',
+      code: '29150045',
+      description: '6FRA6068 Three Phase Traction Motor (2-month index lag)',
+      pvc_formula_code: 'TRACTIONMOTOR',
+      weights_json: JSON.stringify({ C: 25, AL: 10, FE: 20, IM: 15, W: 15 }),
+      extra_fields_json: '[]',
+    },
+    {
+      id: 3,
+      name: 'Main Traction Transformer',
+      code: '29160022',
+      description: '6531 kVA Main Traction Transformer (IEEMA PVC)',
+      pvc_formula_code: 'POWERTRFIEEMA',
+      weights_json: JSON.stringify({ C: 30, AL: 10, FE: 25, IM: 10, W: 10 }),
+      extra_fields_json: '[]',
+    },
+  ];
+
+  const itemIndices = generateMonthlyIndices();
+
+  const tenders: TenderMasterRecord[] = [
+    {
+      id: 1,
+      item_id: 1,
+      tender_no: 'CLW/EL/IGBT/2023/001',
+      basicrate: 28500000,
+      pvcbasedate: '2023-03-01',
+      created_at: '2023-03-15T10:00:00.000Z',
+    },
+    {
+      id: 2,
+      item_id: 1,
+      tender_no: 'CLW/EL/IGBT/2024/002',
+      basicrate: 27400000,
+      pvcbasedate: '2024-04-01',
+      created_at: '2024-04-10T10:00:00.000Z',
+    },
+    {
+      id: 3,
+      item_id: 2,
+      tender_no: 'CLW/EL/TM/2023/105',
+      basicrate: 3250000,
+      pvcbasedate: '2023-06-01',
+      created_at: '2023-06-12T10:00:00.000Z',
+    },
+    {
+      id: 4,
+      item_id: 3,
+      tender_no: 'CLW/EL/TRF/2024/088',
+      basicrate: 7850000,
+      pvcbasedate: '2024-01-01',
+      created_at: '2024-01-20T10:00:00.000Z',
+    },
+  ];
+
+  const tenderVendors: TenderVendorRecord[] = [
+    {
+      id: 1,
+      tender_id: 1,
+      po_no: '2123500101',
+      vendor_name: 'M/s BHEL',
+      cif: 6200000,
+      freightrateperunit: 85000,
+      currency: 'EUR',
+    },
+    {
+      id: 2,
+      tender_id: 1,
+      po_no: '2123500102',
+      vendor_name: 'M/s Medha Servo Drives',
+      cif: 5850000,
+      freightrateperunit: 78000,
+      currency: 'EUR',
+    },
+    {
+      id: 3,
+      tender_id: 1,
+      po_no: '2123500103',
+      vendor_name: 'M/s ABB India Ltd',
+      cif: 6400000,
+      freightrateperunit: 82000,
+      currency: 'USD',
+    },
+    {
+      id: 4,
+      tender_id: 2,
+      po_no: '2124500201',
+      vendor_name: 'M/s BHEL',
+      cif: 5900000,
+      freightrateperunit: 80000,
+      currency: 'EUR',
+    },
+    {
+      id: 5,
+      tender_id: 2,
+      po_no: '2124500202',
+      vendor_name: 'M/s Medha Servo Drives',
+      cif: 5600000,
+      freightrateperunit: 75000,
+      currency: 'EUR',
+    },
+    {
+      id: 6,
+      tender_id: 3,
+      po_no: '2123600301',
+      vendor_name: 'M/s CG Power',
+      cif: 0,
+      freightrateperunit: 22000,
+      currency: 'INR',
+    },
+    {
+      id: 7,
+      tender_id: 4,
+      po_no: '2124700401',
+      vendor_name: 'M/s Hind Rectifiers',
+      cif: 0,
+      freightrateperunit: 45000,
+      currency: 'INR',
+    },
+  ];
+
+  return {
+    nextIds: {
+      users: users.length + 1,
+      items: items.length + 1,
+      itemIndices: itemIndices.length + 1,
+      tenders: tenders.length + 1,
+      tenderVendors: tenderVendors.length + 1,
+      pvcResults: 1,
+      auditLogs: 1,
+    },
+    users,
+    items,
+    itemIndices,
+    tenders,
+    tenderVendors,
+    pvcResults: [],
+    auditLogs: [],
+  };
+}
+
+class MemoryStore {
+  private state: StoreState;
+
+  constructor() {
+    this.state = this.load();
+  }
+
+  private load(): StoreState {
+    try {
+      if (fs.existsSync(SNAPSHOT_PATH)) {
+        const raw = fs.readFileSync(SNAPSHOT_PATH, 'utf-8');
+        const parsed = JSON.parse(raw) as StoreState;
+        if (parsed && Array.isArray(parsed.users) && Array.isArray(parsed.items)) {
+          return parsed;
+        }
+      }
+    } catch {
+      // ignore corrupted snapshot
+    }
+    const fresh = createInitialState();
+    this.persist(fresh);
+    return fresh;
+  }
+
+  private persist(state: StoreState = this.state): void {
+    try {
+      fs.writeFileSync(SNAPSHOT_PATH, JSON.stringify(state), 'utf-8');
+    } catch {
+      // best effort in ephemeral container
+    }
+  }
+
+  public logAudit(
+    userId: number | null,
+    action: 'INSERT' | 'UPDATE' | 'DELETE',
+    tableName: string,
+    rowId: number | string | null,
+    oldData: unknown,
+    newData: unknown
+  ): void {
+    const entry: AuditLogRecord = {
+      id: this.state.nextIds.auditLogs++,
+      user_id: userId,
+      action,
+      table_name: tableName,
+      row_id: rowId != null ? String(rowId) : null,
+      old_data: oldData != null ? JSON.stringify(oldData) : null,
+      new_data: newData != null ? JSON.stringify(newData) : null,
+      timestamp: new Date().toISOString(),
+    };
+    this.state.auditLogs.push(entry);
+    if (this.state.auditLogs.length > 1000) {
+      this.state.auditLogs = this.state.auditLogs.slice(-1000);
+    }
+    this.persist();
+  }
+
+  // ── Users ─────────────────────────────────────────────────────────────
+  getUsers(): UserRecord[] {
+    return [...this.state.users].sort((a, b) => a.id - b.id);
+  }
+
+  getUserById(id: number): UserRecord | undefined {
+    return this.state.users.find((u) => u.id === id);
+  }
+
+  getUserByUsername(username: string): UserRecord | undefined {
+    return this.state.users.find((u) => u.username === username);
+  }
+
+  hasAdmin(): boolean {
+    return this.state.users.some((u) => u.is_admin);
+  }
+
+  createUser(input: Omit<UserRecord, 'id'>, actorId: number | null = null): UserRecord {
+    const user: UserRecord = { id: this.state.nextIds.users++, ...input };
+    this.state.users.push(user);
+    this.logAudit(actorId, 'INSERT', 'user', user.id, null, { ...user, password_hash: '***' });
+    return user;
+  }
+
+  updateUser(id: number, patch: Partial<UserRecord>, actorId: number | null = null): UserRecord | undefined {
+    const user = this.state.users.find((u) => u.id === id);
+    if (!user) return undefined;
+    const oldSnap = { ...user, password_hash: '***' };
+    Object.assign(user, patch);
+    this.logAudit(actorId, 'UPDATE', 'user', user.id, oldSnap, { ...user, password_hash: '***' });
+    return user;
+  }
+
+  deleteUser(id: number, actorId: number | null = null): boolean {
+    const idx = this.state.users.findIndex((u) => u.id === id);
+    if (idx === -1) return false;
+    const [removed] = this.state.users.splice(idx, 1);
+    this.state.pvcResults = this.state.pvcResults.filter((r) => r.user_id !== id);
+    this.logAudit(actorId, 'DELETE', 'user', id, { ...removed, password_hash: '***' }, null);
+    return true;
+  }
+
+  // ── Items ─────────────────────────────────────────────────────────────
+  getItems(): ItemRecord[] {
+    return [...this.state.items].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  getItemById(id: number): ItemRecord | undefined {
+    return this.state.items.find((it) => it.id === id);
+  }
+
+  getItemByName(name: string): ItemRecord | undefined {
+    return this.state.items.find((it) => it.name.toLowerCase() === name.toLowerCase());
+  }
+
+  createItem(input: Omit<ItemRecord, 'id'>, actorId: number | null = null): ItemRecord {
+    const item: ItemRecord = { id: this.state.nextIds.items++, ...input };
+    this.state.items.push(item);
+    this.logAudit(actorId, 'INSERT', 'item', item.id, null, item);
+    return item;
+  }
+
+  updateItem(id: number, patch: Partial<ItemRecord>, actorId: number | null = null): ItemRecord | undefined {
+    const item = this.state.items.find((it) => it.id === id);
+    if (!item) return undefined;
+    const oldSnap = { ...item };
+    Object.assign(item, patch);
+    this.logAudit(actorId, 'UPDATE', 'item', item.id, oldSnap, item);
+    return item;
+  }
+
+  deleteItem(id: number, actorId: number | null = null): { ok: boolean; error?: string } {
+    const hasTenders = this.state.tenders.some((t) => t.item_id === id);
+    const hasCalcs = this.state.pvcResults.some((c) => c.item_id === id);
+    if (hasTenders || hasCalcs) {
+      return { ok: false, error: 'Cannot delete item. It is referenced by tenders or calculation history.' };
+    }
+    const idx = this.state.items.findIndex((it) => it.id === id);
+    if (idx === -1) return { ok: false, error: 'Item not found.' };
+    const [removed] = this.state.items.splice(idx, 1);
+    this.state.itemIndices = this.state.itemIndices.filter((r) => r.item_id !== id);
+    this.logAudit(actorId, 'DELETE', 'item', id, removed, null);
+    return { ok: true };
+  }
+
+  // ── Item Indices ──────────────────────────────────────────────────────
+  getItemIndices(itemId: number, order: 'asc' | 'desc' = 'desc'): ItemIndexRecord[] {
+    return this.state.itemIndices
+      .filter((r) => r.item_id === itemId)
+      .sort((a, b) => (order === 'asc' ? a.month.localeCompare(b.month) : b.month.localeCompare(a.month)));
+  }
+
+  getItemIndexById(itemId: number, rowId: number): ItemIndexRecord | undefined {
+    return this.state.itemIndices.find((r) => r.item_id === itemId && r.id === rowId);
+  }
+
+  getItemIndexByMonth(itemId: number, month: string): ItemIndexRecord | undefined {
+    return this.state.itemIndices.find((r) => r.item_id === itemId && r.month === month);
+  }
+
+  createItemIndex(input: Omit<ItemIndexRecord, 'id'>, actorId: number | null = null): ItemIndexRecord {
+    const row: ItemIndexRecord = { id: this.state.nextIds.itemIndices++, ...input };
+    this.state.itemIndices.push(row);
+    this.logAudit(actorId, 'INSERT', 'item_index', row.id, null, row);
+    return row;
+  }
+
+  updateItemIndex(
+    itemId: number,
+    rowId: number,
+    patch: Partial<ItemIndexRecord>,
+    actorId: number | null = null
+  ): ItemIndexRecord | undefined {
+    const row = this.getItemIndexById(itemId, rowId);
+    if (!row) return undefined;
+    const oldSnap = { ...row };
+    Object.assign(row, patch);
+    this.logAudit(actorId, 'UPDATE', 'item_index', row.id, oldSnap, row);
+    return row;
+  }
+
+  deleteItemIndex(itemId: number, rowId: number, actorId: number | null = null): boolean {
+    const idx = this.state.itemIndices.findIndex((r) => r.item_id === itemId && r.id === rowId);
+    if (idx === -1) return false;
+    const [removed] = this.state.itemIndices.splice(idx, 1);
+    this.logAudit(actorId, 'DELETE', 'item_index', rowId, removed, null);
+    return true;
+  }
+
+  // ── Tenders & Vendors ─────────────────────────────────────────────────
+  getTenders(): Array<TenderMasterRecord & { item?: ItemRecord; vendors: TenderVendorRecord[] }> {
+    return [...this.state.tenders]
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .map((t) => ({
+        ...t,
+        item: this.getItemById(t.item_id),
+        vendors: this.getTenderVendors(t.id),
+      }));
+  }
+
+  getTendersByNumberAsc(): Array<TenderMasterRecord & { item?: ItemRecord; vendors: TenderVendorRecord[] }> {
+    return [...this.state.tenders]
+      .sort((a, b) => a.tender_no.localeCompare(b.tender_no))
+      .map((t) => ({
+        ...t,
+        item: this.getItemById(t.item_id),
+        vendors: this.getTenderVendors(t.id),
+      }));
+  }
+
+  getTenderById(id: number): (TenderMasterRecord & { item?: ItemRecord; vendors: TenderVendorRecord[] }) | undefined {
+    const t = this.state.tenders.find((x) => x.id === id);
+    if (!t) return undefined;
+    return {
+      ...t,
+      item: this.getItemById(t.item_id),
+      vendors: this.getTenderVendors(t.id),
+    };
+  }
+
+  getTenderByNo(tenderNo: string): (TenderMasterRecord & { item?: ItemRecord; vendors: TenderVendorRecord[] }) | undefined {
+    const t = this.state.tenders.find((x) => x.tender_no === tenderNo);
+    if (!t) return undefined;
+    return this.getTenderById(t.id);
+  }
+
+  createTender(input: Omit<TenderMasterRecord, 'id' | 'created_at'>, actorId: number | null = null): TenderMasterRecord {
+    const row: TenderMasterRecord = {
+      id: this.state.nextIds.tenders++,
+      created_at: new Date().toISOString(),
+      ...input,
+    };
+    this.state.tenders.push(row);
+    this.logAudit(actorId, 'INSERT', 'tender_master', row.id, null, row);
+    return row;
+  }
+
+  updateTender(id: number, patch: Partial<TenderMasterRecord>, actorId: number | null = null): TenderMasterRecord | undefined {
+    const row = this.state.tenders.find((t) => t.id === id);
+    if (!row) return undefined;
+    const oldSnap = { ...row };
+    Object.assign(row, patch);
+    this.logAudit(actorId, 'UPDATE', 'tender_master', row.id, oldSnap, row);
+    return row;
+  }
+
+  deleteTender(id: number, actorId: number | null = null): boolean {
+    const idx = this.state.tenders.findIndex((t) => t.id === id);
+    if (idx === -1) return false;
+    const [removed] = this.state.tenders.splice(idx, 1);
+    this.state.tenderVendors = this.state.tenderVendors.filter((v) => v.tender_id !== id);
+    this.logAudit(actorId, 'DELETE', 'tender_master', id, removed, null);
+    return true;
+  }
+
+  getTenderVendors(tenderId: number): TenderVendorRecord[] {
+    return this.state.tenderVendors
+      .filter((v) => v.tender_id === tenderId)
+      .sort((a, b) => a.vendor_name.localeCompare(b.vendor_name));
+  }
+
+  getAllVendors(): TenderVendorRecord[] {
+    return [...this.state.tenderVendors];
+  }
+
+  getTenderVendorById(tenderId: number, rowId: number): TenderVendorRecord | undefined {
+    return this.state.tenderVendors.find((v) => v.tender_id === tenderId && v.id === rowId);
+  }
+
+  createTenderVendor(input: Omit<TenderVendorRecord, 'id'>, actorId: number | null = null): TenderVendorRecord {
+    const row: TenderVendorRecord = { id: this.state.nextIds.tenderVendors++, ...input };
+    this.state.tenderVendors.push(row);
+    this.logAudit(actorId, 'INSERT', 'tender_vendor', row.id, null, row);
+    return row;
+  }
+
+  updateTenderVendor(
+    tenderId: number,
+    rowId: number,
+    patch: Partial<TenderVendorRecord>,
+    actorId: number | null = null
+  ): TenderVendorRecord | undefined {
+    const row = this.getTenderVendorById(tenderId, rowId);
+    if (!row) return undefined;
+    const oldSnap = { ...row };
+    Object.assign(row, patch);
+    this.logAudit(actorId, 'UPDATE', 'tender_vendor', row.id, oldSnap, row);
+    return row;
+  }
+
+  deleteTenderVendor(tenderId: number, rowId: number, actorId: number | null = null): boolean {
+    const idx = this.state.tenderVendors.findIndex((v) => v.tender_id === tenderId && v.id === rowId);
+    if (idx === -1) return false;
+    const [removed] = this.state.tenderVendors.splice(idx, 1);
+    this.logAudit(actorId, 'DELETE', 'tender_vendor', rowId, removed, null);
+    return true;
+  }
+
+  // ── PVC Results ───────────────────────────────────────────────────────
+  getPVCResults(userId?: number): Array<PVCResultRecord & { item?: ItemRecord }> {
+    return this.state.pvcResults
+      .filter((r) => (userId != null ? r.user_id === userId : true))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .map((r) => ({ ...r, item: this.getItemById(r.item_id) }));
+  }
+
+  getPVCResultById(id: number): (PVCResultRecord & { item?: ItemRecord }) | undefined {
+    const r = this.state.pvcResults.find((x) => x.id === id);
+    if (!r) return undefined;
+    return { ...r, item: this.getItemById(r.item_id) };
+  }
+
+  createPVCResult(input: Omit<PVCResultRecord, 'id' | 'created_at'>, actorId: number | null = null): PVCResultRecord {
+    const row: PVCResultRecord = {
+      id: this.state.nextIds.pvcResults++,
+      created_at: new Date().toISOString(),
+      ...input,
+    };
+    this.state.pvcResults.push(row);
+    this.logAudit(actorId, 'INSERT', 'pvc_result', row.id, null, { id: row.id, item_id: row.item_id, fairprice: row.fairprice });
+    return row;
+  }
+
+  updatePVCResult(id: number, patch: Partial<PVCResultRecord>, actorId: number | null = null): PVCResultRecord | undefined {
+    const row = this.state.pvcResults.find((x) => x.id === id);
+    if (!row) return undefined;
+    const oldSnap = { id: row.id, fairprice: row.fairprice, selectedscenario: row.selectedscenario };
+    Object.assign(row, patch);
+    this.logAudit(actorId, 'UPDATE', 'pvc_result', row.id, oldSnap, { id: row.id, fairprice: row.fairprice, selectedscenario: row.selectedscenario });
+    return row;
+  }
+
+  // ── Audit Logs ────────────────────────────────────────────────────────
+  getAuditLogs(limit = 200): Array<AuditLogRecord & { user?: UserRecord }> {
+    return [...this.state.auditLogs]
+      .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+      .slice(0, limit)
+      .map((l) => ({
+        ...l,
+        user: l.user_id != null ? this.getUserById(l.user_id) : undefined,
+      }));
+  }
+
+  // ── Backup Snapshot ───────────────────────────────────────────────────
+  exportBackup(): Record<string, unknown> {
+    return {
+      exported_at: new Date().toISOString(),
+      app: 'CLW PVC Calculation System',
+      counts: {
+        users: this.state.users.length,
+        items: this.state.items.length,
+        item_indices: this.state.itemIndices.length,
+        tenders: this.state.tenders.length,
+        tender_vendors: this.state.tenderVendors.length,
+        pvc_results: this.state.pvcResults.length,
+        audit_logs: this.state.auditLogs.length,
+      },
+      data: {
+        users: this.state.users.map(({ password_hash: _pw, ...rest }) => rest),
+        items: this.state.items,
+        item_indices: this.state.itemIndices,
+        tenders: this.state.tenders,
+        tender_vendors: this.state.tenderVendors,
+        pvc_results: this.state.pvcResults,
+        audit_logs: this.state.auditLogs,
+      },
+    };
+  }
+
+  getStats(): { totalCalculations: number; activeContracts: number; systemUsers: number } {
+    return {
+      totalCalculations: this.state.pvcResults.length,
+      activeContracts: this.state.tenders.length,
+      systemUsers: this.state.users.length,
+    };
+  }
+}
+
+export function paginate<T>(allItems: T[], page: number, perPage = 25): Pagination<T> {
+  const safePage = Math.max(1, Number.isFinite(page) ? Math.floor(page) : 1);
+  const total = allItems.length;
+  const pages = Math.max(1, Math.ceil(total / perPage));
+  const clampedPage = Math.min(safePage, pages);
+  const start = (clampedPage - 1) * perPage;
+  const items = allItems.slice(start, start + perPage);
+  return {
+    items,
+    page: clampedPage,
+    per_page: perPage,
+    total,
+    pages,
+    has_prev: clampedPage > 1,
+    has_next: clampedPage < pages,
+    prev_num: Math.max(1, clampedPage - 1),
+    next_num: Math.min(pages, clampedPage + 1),
+  };
+}
+
+export const store = new MemoryStore();

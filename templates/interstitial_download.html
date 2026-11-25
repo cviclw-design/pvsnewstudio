@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Download R-Note{% endblock %}
+
+{% block content %}
+<style>
+  .download-container {
+    max-width: 700px;
+    margin: 5rem auto;
+    padding: 2rem;
+    background-color: #f8f9fa;
+    border-radius: 0.5rem;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    text-align: center;
+  }
+</style>
+
+<div class="container">
+  <div class="download-container">
+    <h2 class="mb-3">Step 1: Download R-Note Manually</h2>
+    <p class="lead">The IREPS server is blocking automated downloads. Please download the file using your browser.</p>
+    <hr>
+    <p>A new tab should have opened with the download link. If not, click the button below to open it:</p>
+    <a href="{{ download_url }}" target="_blank" class="btn btn-primary btn-lg mb-3">
+      <i class="bi bi-box-arrow-up-right"></i> Open R-Note PDF for '{{ rnote_no }}'
+    </a>
+    <div class="alert alert-warning">
+      <strong>Important:</strong> After the PDF opens, save it as <code>{{ rnote_no }}.pdf</code> inside the application's <code>downloads/RNotes/</code> folder.
+    </div>
+    <p>Once the file is saved in the correct location, click below to continue:</p>
+    <a href="{{ continue_url }}" class="btn btn-success btn-lg">
+      <i class="bi bi-arrow-right-circle-fill"></i> Continue R-Note Processing
+    </a>
+  </div>
+</div>
+
+<script>
+  // Automatically open the download URL in a new tab when the page loads.
+  window.open("{{ download_url }}", "_blank");
+</script>
+{% endblock %}

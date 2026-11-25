@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit User' if user else 'Add User' }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-1">{{ 'Edit User' if user else 'Add User' }}</h3>
+  <a href="{{ url_for('admin.users_list') }}" class="btn btn-outline-secondary">Back to Users</a>
+</div>
+
+<form method="post">
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Username <span class="text-danger">*</span></label>
+          <input type="text" name="username" class="form-control" required
+                 value="{{ user.username if user else '' }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Email</label>
+          <input type="email" name="email" class="form-control"
+                 value="{{ user.email if user else '' }}">
+        </div>
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Full Name</label>
+          <input type="text" name="fullname" class="form-control"
+                 value="{{ user.full_name if user else '' }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Contact No</label>
+          <input type="text" name="contactno" class="form-control"
+                 value="{{ user.contact_no if user else '' }}">
+        </div>
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Designation</label>
+          <input type="text" name="designation" class="form-control"
+                 value="{{ user.designation if user else '' }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Control No</label>
+          <input type="text" name="controlno" class="form-control"
+                 value="{{ user.control_no if user else '' }}">
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <label class="form-label fw-semibold">Password {% if not user %}<span class="text-danger">*</span>{% endif %}</label>
+        <input type="password" name="password" class="form-control" {% if not user %}required{% endif %}>
+        {% if user %}
+        <small class="text-muted">Leave blank to keep the current password.</small>
+        {% endif %}
+      </div>
+
+      <div class="mb-3">
+        <div class="form-check form-switch fs-5">
+          <input class="form-check-input" type="checkbox" role="switch" id="isAdminSwitch" name="is_admin" value="1"
+                 {% if user and user.is_admin %}checked{% endif %}
+                 {% if user and user.id == current_user.id %}disabled{% endif %}>
+          <label class="form-check-label fs-6 fw-semibold ms-1" for="isAdminSwitch" style="padding-top: 0.15rem;">Admin Privileges</label>
+        </div>
+        {% if user and user.id == current_user.id %}
+        <small class="text-muted d-block mt-1">You cannot remove admin privileges from your own account.</small>
+        {% endif %}
+      </div>
+
+      <div class="text-end">
+        <button type="button" class="btn btn-outline-secondary me-2" onclick="window.history.back()">Back</button>
+        <button type="submit" class="btn btn-primary">
+          {{ 'Update' if user else 'Create' }} User
+        </button>
+      </div>
+    </div>
+  </div>
+</form>
+{% endblock %}

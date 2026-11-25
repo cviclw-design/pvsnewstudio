@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Database Backups{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row mb-3">
+        <div class="col">
+            <h2>Database Backups</h2>
+        </div>
+        <div class="col text-end">
+            <form action="{{ url_for('admin.backup_now') }}" method="POST" class="d-inline">
+                <button type="submit" class="btn btn-primary" onclick="return confirm('Are you sure you want to create a new database backup?');">
+                    <i class="fas fa-database me-2"></i>Create Backup Now
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">Existing Backups</div>
+        <div class="card-body">
+            {% if files %}
+            <ul class="list-group list-group-flush">
+                {% for file in files %}
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                    <div>
+                        {% if file.endsWith('.sql') %}
+                            <i class="fas fa-file-code text-muted me-2"></i>
+                        {% else %}
+                            <i class="fas fa-file-archive text-muted me-2"></i>
+                        {% endif %}
+                        <code>{{ file }}</code>
+                    </div>
+                    <div>
+                        <a href="{{ url_for('admin.download_backup', filename=file) }}" class="btn btn-sm btn-outline-secondary">
+                            <i class="fas fa-download me-1"></i> Download
+                        </a>
+                        <form action="{{ url_for('admin.delete_backup', filename=file) }}" method="POST" class="d-inline ms-1">
+                            <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Are you sure you want to delete this backup file? This action cannot be undone.');">
+                                <i class="fas fa-trash-alt"></i>
+                            </button>
+                        </form>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="text-muted">No backup files found.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

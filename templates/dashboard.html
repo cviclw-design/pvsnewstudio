@@ -1,0 +1,737 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+
+<div class="gov-dashboard">
+
+    <!-- TOP HEADER -->
+    <div class="top-strip">
+        <div class="container-fluid px-lg-5 d-flex justify-content-between align-items-center">
+
+            <div class="gov-title">
+                <img src="{{ url_for('static', filename='image/indian_railway_logo.png') }}"
+                     class="rail-logo">
+
+                <div>
+                    <h5>CLW</h5>
+                    <span>PVC Calculation System</span>
+                </div>
+            </div>
+
+            <div class="gov-user">
+                <i class="bi bi-person-circle"></i>
+                Welcome, {{ current_user.username }}
+            </div>
+
+        </div>
+    </div>
+
+    <!-- HERO SECTION -->
+    <section class="hero-panel container-fluid px-lg-5 py-4">
+
+        <div class="row align-items-center">
+
+            <!-- LEFT -->
+            <div class="col-lg-8">
+
+                <div class="hero-content">
+
+                    <div class="gov-badge">
+                        Work with Perfection
+                    </div>
+
+                    <h1>
+                        PVC Calculator
+                    </h1>
+
+                    <p>
+                        Centralized system for PVC calculations,
+                        tender indices and reporting.
+                    </p>
+
+                    <!-- QUICK ACTIONS -->
+                    <div class="quick-actions">
+
+                        <a href="{{ url_for('pvc.calculator') }}"
+                           class="gov-btn primary-btn">
+
+                            <i class="bi bi-calculator-fill"></i>
+                            PVC Calculator
+
+                        </a>
+
+                        <a href="{{ url_for('main.history') }}"
+                           class="gov-btn secondary-btn">
+
+                            <i class="bi bi-clock-history"></i>
+                            Calculation History
+
+                        </a>
+
+                        {% if current_user.is_admin %}
+                        <a href="{{ url_for('admin.items_list') }}"
+                           class="gov-btn admin-btn">
+
+                            <i class="bi bi-gear-fill"></i>
+                            Administration
+
+                        </a>
+                        {% endif %}
+
+                    </div>
+
+                </div>
+
+            </div>
+
+            <!-- RIGHT -->
+            <div class="col-lg-4 text-center">
+
+                <div class="train-panel">
+
+                    <div class="train-header">
+                        AMRIT BHARAT EXPRESS
+                    </div>
+
+                    <img src="{{ url_for('static', filename='image/vande_bharat.png') }}"
+                         class="train-image"
+                         alt="Railway Train">
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </section>
+
+    <!-- DASHBOARD GRID -->
+    <section class="container-fluid px-lg-5 pb-5">
+
+        <!-- MAIN SERVICES -->
+        <div class="service-panel mb-4">
+            <div class="section-title">
+                <i class="bi bi-grid-fill"></i>
+                Main Services
+            </div>
+            <div class="row g-4 mt-1 justify-content-center">
+
+                <!-- CARD -->
+                <div class="col-md-6 col-xl-3">
+                    <div class="service-card">
+                        <div class="service-icon blue-icon">
+                            <i class="bi bi-calculator-fill"></i>
+                        </div>
+                        <div class="service-info">
+                            <h4>PVC Calculation</h4>
+                            <p>Generate new price variation calculations for railway tenders.</p>
+                            <a href="{{ url_for('pvc.calculator') }}">Open Module</a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Full Document Processing (R-Note, IC, PO, MA) -->
+                <div class="col-md-6 col-xl-3">
+                    <div class="service-card">
+                        <div class="service-icon" style="background:#6f42c1;">
+                            <i class="bi bi-journal-check"></i>
+                        </div>
+                        <div class="service-info">
+                            <h4>Full Document Processing</h4>
+                            <p>
+                                Enter an R-Note to fetch R-Note, IC, PO, and all related MA documents.
+                            </p>
+                            <a href="#" onclick="processRNote()">Open Module</a>
+                        </div>
+                    </div>
+                </div>
+                <!-- CARD -->
+                <div class="col-md-6 col-xl-3">
+                    <div class="service-card">
+                        <div class="service-icon green-icon">
+                            <i class="bi bi-file-earmark-excel-fill"></i>
+                        </div>
+                        <div class="service-info">
+                            <h4>Calculation History</h4>
+                            <p>Access previous records, print reports and export Excel files.</p>
+                            <a href="{{ url_for('main.history') }}">Open Module</a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ADMIN -->
+                {% if current_user.is_admin %}
+                <div class="col-md-6 col-xl-3">
+                    <div class="service-card">
+                        <div class="service-icon red-icon">
+                            <i class="bi bi-gear-fill"></i>
+                        </div>
+                        <div class="service-info">
+                            <h4>Administration</h4>
+                            <p>Manage master data, indices and tender configurations.</p>
+                            <a href="{{ url_for('admin.items_list') }}">Open Module</a>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- REPORTS -->
+                <div class="col-md-6 col-xl-3">
+                    <div class="service-card">
+                        <div class="service-icon orange-icon">
+                            <i class="bi bi-bar-chart-fill"></i>
+                        </div>
+                        <div class="service-info">
+                            <h4>Reports & Analytics</h4>
+                            <p>View summary reports, contract analysis and tender statistics.</p>
+                            <a href="#">Open Module</a>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- BOTTOM AREA: NOTICES & STATS -->
+        <div class="row g-4">
+
+            <!-- NOTICE BOARD -->
+            <div class="col-xl-4">
+                <div class="notice-board h-100 mb-0">
+                    <div class="section-title">
+                        <i class="bi bi-megaphone-fill"></i>
+                        Important Notices
+                    </div>
+                    <ul>
+                        <li>PVC Index updated for current monthly.</li>
+                        <li>Ensure monthly tender data backup.</li>
+                        <li>All calculations should be verified before approval.</li>
+                        <li>System maintenance scheduled on Sunday.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- STATISTICS -->
+            <div class="col-xl-8">
+                <div class="stats-panel h-100 mb-0">
+                    <div class="section-title">
+                        <i class="bi bi-bar-chart-line-fill"></i>
+                        System Statistics
+                    </div>
+                    <div class="row g-3 mt-2 text-center align-items-center">
+                        <div class="col-md-4">
+                            <div class="stat-box m-0">
+                                <h3>{{ stats.totalCalculations if stats else 0 }}</h3>
+                                <p>Total Calculations</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="stat-box m-0">
+                                <h3>{{ stats.activeContracts if stats else 0 }}</h3>
+                                <p>Active Contracts</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="stat-box m-0">
+                                <h3>{{ stats.systemUsers if stats else 0 }}</h3>
+                                <p>System Users</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+    </section>
+
+</div>
+
+<style>
+
+/* Force dashboard to use full page width by escaping base.html container */
+body > .container {
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+/* =========================
+   GENERAL
+========================= */
+
+body{
+
+    background:#eef2f7;
+    font-family:Arial, sans-serif;
+}
+
+.gov-dashboard{
+
+    min-height:100vh;
+}
+
+/* =========================
+   TOP HEADER
+========================= */
+
+.top-strip{
+
+    background:#012b55;
+    color:white;
+
+    padding:12px 0;
+
+    border-bottom:4px solid #ff9933;
+}
+
+.gov-title{
+
+    display:flex;
+    align-items:center;
+    gap:15px;
+}
+
+.gov-title h5{
+
+    margin:0;
+    font-weight:700;
+}
+
+.gov-title span{
+
+    font-size:14px;
+    opacity:0.9;
+}
+
+.rail-logo{
+
+    width:60px;
+    height:60px;
+    object-fit:contain;
+}
+
+.gov-user{
+
+    font-weight:600;
+    font-size:15px;
+}
+
+/* =========================
+   HERO SECTION
+========================= */
+
+.hero-panel{
+
+    background:white;
+
+    border-radius:8px;
+
+    margin-top:20px;
+
+    box-shadow:
+        0 2px 10px rgba(0,0,0,0.08);
+
+    border-top:5px solid #0d6efd;
+}
+
+.gov-badge{
+
+    display:inline-block;
+
+    background:#198754;
+    color:white;
+
+    padding:8px 18px;
+
+    border-radius:4px;
+
+    font-size:14px;
+    font-weight:700;
+
+    margin-bottom:20px;
+}
+
+.hero-content h1{
+
+    color:#012b55;
+
+    font-size:2.5rem;
+
+    font-weight:700;
+
+    margin-bottom:20px;
+}
+
+.hero-content p{
+
+    color:#555;
+
+    font-size:1.05rem;
+
+    line-height:1.8;
+}
+
+/* =========================
+   BUTTONS
+========================= */
+
+.quick-actions{
+
+    display:flex;
+    flex-wrap:wrap;
+
+    gap:15px;
+
+    margin-top:30px;
+}
+
+.gov-btn{
+
+    padding:12px 24px;
+
+    border-radius:5px;
+
+    text-decoration:none;
+
+    font-weight:600;
+
+    transition:0.3s;
+}
+
+.gov-btn i{
+
+    margin-right:8px;
+}
+
+.primary-btn{
+
+    background:#0d6efd;
+    color:white;
+}
+
+.secondary-btn{
+
+    background:#198754;
+    color:white;
+}
+
+.admin-btn{
+
+    background:#dc3545;
+    color:white;
+}
+
+.gov-btn:hover{
+
+    opacity:0.9;
+    transform:translateY(-2px);
+}
+
+/* =========================
+   TRAIN PANEL
+========================= */
+
+.train-panel{
+
+    background:#f8f9fa;
+
+    border:1px solid #dfe5ec;
+
+    border-radius:10px;
+
+    padding:15px;
+
+    position:relative;
+}
+
+.train-header{
+
+    background:#012b55;
+    color:white;
+
+    padding:10px;
+
+    border-radius:5px;
+
+    font-size:14px;
+
+    font-weight:700;
+
+    margin-bottom:15px;
+}
+
+.train-image{
+
+    width:100%;
+    max-height:300px;
+
+    object-fit:contain;
+
+    transition:0.4s;
+}
+
+.train-image:hover{
+
+    transform:scale(1.03);
+}
+
+/* =========================
+   PANELS
+========================= */
+
+.service-panel,
+.notice-board,
+.stats-panel{
+
+    background:white;
+
+    border-radius:8px;
+
+    padding:25px;
+
+    box-shadow:
+        0 2px 10px rgba(0,0,0,0.08);
+}
+
+/* =========================
+   SECTION TITLE
+========================= */
+
+.section-title{
+
+    font-size:1.2rem;
+
+    font-weight:700;
+
+    color:#012b55;
+
+    border-bottom:2px solid #dee2e6;
+
+    padding-bottom:12px;
+
+    margin-bottom:20px;
+}
+
+.section-title i{
+
+    margin-right:10px;
+}
+
+/* =========================
+   SERVICE CARD
+========================= */
+
+.service-card{
+
+    display:flex;
+
+    gap:15px;
+
+    padding:18px;
+
+    border:1px solid #dee2e6;
+
+    border-radius:8px;
+
+    transition:0.3s;
+
+    height:100%;
+}
+
+.service-card:hover{
+
+    box-shadow:
+        0 4px 14px rgba(0,0,0,0.1);
+
+    transform:translateY(-4px);
+}
+
+.service-icon{
+
+    width:55px;
+    height:55px;
+
+    min-width:55px;
+
+    border-radius:8px;
+
+    display:flex;
+    align-items:center;
+    justify-content:center;
+
+    font-size:1.5rem;
+
+    color:white;
+}
+
+.blue-icon{
+
+    background:#0d6efd;
+}
+
+.green-icon{
+
+    background:#198754;
+}
+
+.red-icon{
+
+    background:#dc3545;
+}
+
+.orange-icon{
+
+    background:#fd7e14;
+}
+
+.service-info h4{
+
+    font-size:1.05rem;
+
+    font-weight:700;
+
+    color:#012b55;
+
+    margin-bottom:5px;
+}
+
+.service-info p{
+
+    color:#666;
+
+    font-size:13px;
+
+    margin:8px 0;
+}
+
+.service-info a{
+
+    text-decoration:none;
+
+    font-weight:700;
+
+    color:#0d6efd;
+}
+
+/* =========================
+   NOTICE BOARD
+========================= */
+
+.notice-board{
+
+    margin-bottom:25px;
+}
+
+.notice-board ul{
+
+    padding-left:20px;
+}
+
+.notice-board li{
+
+    margin-bottom:15px;
+
+    color:#444;
+
+    line-height:1.7;
+}
+
+/* =========================
+   STATS
+========================= */
+
+.stat-box{
+
+    background:#f8f9fa;
+
+    border-left:5px solid #0d6efd;
+
+    padding:18px;
+
+    border-radius:6px;
+
+    margin-bottom:18px;
+}
+
+.stat-box h3{
+
+    margin:0;
+
+    color:#012b55;
+
+    font-weight:700;
+}
+
+.stat-box p{
+
+    margin:5px 0 0;
+
+    color:#666;
+}
+
+/* =========================
+   MOBILE
+========================= */
+
+@media(max-width:992px){
+
+    .hero-content{
+
+        text-align:center;
+    }
+
+    .quick-actions{
+
+        justify-content:center;
+    }
+
+    .train-panel{
+
+        margin-top:30px;
+    }
+
+}
+
+@media(max-width:576px){
+
+    .hero-content h1{
+
+        font-size:2rem;
+    }
+
+    .service-card{
+
+        flex-direction:column;
+        text-align:center;
+    }
+
+}
+
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const poForm = document.querySelector('form[action*="/pvc/process_po/"]');
+  if (poForm) {
+    poForm.addEventListener('submit', function(event) {
+      event.preventDefault();
+      const poNumber = poForm.querySelector('input[name="po_no"]').value.trim();
+      if (poNumber) {
+        window.location.href = `/pvc/process_po/${poNumber}`;
+      }
+    });
+  }
+});
+function processRNote() {
+  const rnoteNumber = prompt("Please enter the R-Note Number to process:");
+  if (rnoteNumber && rnoteNumber.trim()) {
+    window.location.href = `/pvc/process_rnote/${rnoteNumber.trim()}`;
+  } else if (rnoteNumber !== null) {
+    alert("R-Note Number cannot be empty.");
+  }
+}
+</script>
+
+{% endblock %}

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Register{% endblock %}
+
+{% block content %}
+<style>
+  body {
+    background: url('https://upload.wikimedia.org/wikipedia/commons/4/4e/Vande_Sadharan.jpg') no-repeat center center fixed !important;
+    background-size: cover !important;
+  }
+  /* Hide standard navbar */
+  body > nav.navbar { display: none !important; }
+  body > .container { max-width: 100% !important; padding: 0 !important; margin: 0 !important; }
+  .card {
+    background-color: rgba(255, 255, 255, 0.94);
+    box-shadow: 0 15px 35px rgba(0,0,0,0.3);
+    backdrop-filter: blur(6px);
+  }
+</style>
+
+<!-- Custom Full-Width Header -->
+<div class="p-3 shadow-sm w-100 text-center mb-4" style="background: rgba(0,0,0,0.75); backdrop-filter: blur(8px);">
+  <h3 class="mb-0 text-white fw-bold"><i class="bi bi-train-front-fill me-2"></i> CLW Data Mining & Tools Portal</h3>
+</div>
+
+<div class="container row justify-content-center mx-auto pb-4">
+  <div class="col-md-6">
+    <div class="card shadow-sm">
+      <div class="card-header bg-white py-3 border-bottom-0">
+        <h5 class="mb-0 text-success fw-bold"><i class="bi bi-person-plus me-1"></i> Create Account</h5>
+      </div>
+      <div class="card-body">
+        <form method="post" action="{{ url_for('auth.register') }}">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">Username</label>
+              <input type="text" name="username" class="form-control" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">Email (optional)</label>
+              <input type="email" name="email" class="form-control">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">Password</label>
+              <input type="password" name="password" class="form-control" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">Full Name</label>
+              <input type="text" name="fullname" class="form-control">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">Contact No</label>
+              <input type="text" name="contactno" class="form-control">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">Designation</label>
+              <input type="text" name="designation" class="form-control">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">Control No</label>
+              <input type="text" name="controlno" class="form-control">
+            </div>
+          </div>
+
+          <div class="d-flex justify-content-between align-items-center mt-3">
+            <button type="submit" class="btn btn-success">
+              <i class="bi bi-check2-circle me-1"></i> Register
+            </button>
+            <a href="{{ url_for('auth.login') }}" class="small">
+              Already have an account? Login
+            </a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

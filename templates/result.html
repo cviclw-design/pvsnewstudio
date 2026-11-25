@@ -1,0 +1,1617 @@
+{% extends "base.html" %}
+
+{% block title %}PVC Result{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+
+  {# ══ Scenario Name Dictionary ══ #}
+  {% set sc_names = {"A2": "Actual PVC", "B2": "Contractual PVC", "C1": "Lower Actual PVC", "D1": "Lower Contractual PVC"} %}
+
+  {# ══ D1 Applicable Flag ══ #}
+  {% set _lbd = data.lowerbasicdate %}
+  {% set _rdp = data.origdp %}
+  {% set d1_applicable = true %}
+  {% if _lbd and _rdp and _lbd > _rdp %}
+    {% set d1_applicable = false %}
+  {% endif %}
+
+  {# ══ Determine visible scenarios once ══ #}
+  {% set ratemode_str = (data.rateapplied or "") | lower | trim %}
+  {% if ratemode_str in ["supply before due date", "supply within original dp or refixed dp"] %}
+    {% set showsc = ["A2"] %}
+  {% elif ratemode_str == "lower rate applicable within dp" %}
+    {% set showsc = ["A2", "C1"] %}
+  {% elif ratemode_str in ["supply after due date", "supply beyond original dp or refixed dp"] %}
+    {% set showsc = ["A2", "B2"] %}
+  {% else %}
+    {% if d1_applicable %}
+      {% set showsc = ["A2", "B2", "C1", "D1"] %}
+    {% else %}
+      {% set showsc = ["A2", "B2", "C1"] %}
+    {% endif %}
+  {% endif %}
+
+  {# ══ LD shorthand ══ #}
+  {% set _ldapply  = result.data.ldapplicable %}
+  {% set _ldpct    = result.data.ldratepct  | float(0) %}
+  {% set _ldweeks  = result.data.ldweeks    | float(0) %}
+  {% set _lddays   = result.data.delaydays  | float(0) %}
+
+  <!-- ─── HEADER ──────────────────────────────── -->
+  <div class="alert alert-success mb-3">
+    <h4 class="mb-1">
+      <i class="bi bi-calculator-fill me-2"></i> PVC Calculation Result
+    </h4>
+    <p class="mb-0">
+      <strong>User:</strong> {{ current_user.username }}
+      &nbsp;|&nbsp;
+      <strong>Item:</strong> {{ item }}{% if itemobj and itemobj.code %} ({{ itemobj.code }}){% endif %}
+      &nbsp;|&nbsp;
+      <strong>Calc ID:</strong> {{ calcid }}
+      {% if result.data.tenderno %}
+        &nbsp;|&nbsp;<strong>Tender:</strong> {{ result.data.tenderno }}
+      {% endif %}
+      {% if result.data.pono %}
+        &nbsp;|&nbsp;<strong>PO No:</strong> {{ result.data.pono }}
+      {% endif %}
+    </p>
+    {% if itemobj and itemobj.description %}
+    <p class="mb-0 mt-1"><small class="text-muted">{{ itemobj.description }}</small></p>
+    {% endif %}
+  </div>
+
+  <!-- ─── TOP SUMMARY CARDS ───────────────────── -->
+  <div class="row text-center mb-4 hide-in-print-raw">
+    <div class="col-md-3 mb-2">
+      <div class="card bg-success text-white h-100">
+        <div class="card-body py-3">
+          <h4 class="mb-1">₹{{ "%.2f"|format(result.data.fairprice | float(0)) }}</h4>
+          <small><strong>Final Payable Fair Price</strong></small>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3 mb-2">
+      <div class="card bg-primary text-white h-100">
+        <div class="card-body py-3">
+          {% set sc = result.data.selectedscenario %}
+          {% if sc == "A2" %}
+            <h5 class="mb-1">₹{{ "%.2f"|format(result.data.pvcactual | float(0)) }}</h5>
+            <small>Actual PVC (A2)</small>
+          {% elif sc == "B2" %}
+            <h5 class="mb-1">₹{{ "%.2f"|format(result.data.pvccontractual | float(0)) }}</h5>
+            <small>Contractual PVC (B2)</small>
+          {% elif sc == "C1" %}
+            <h5 class="mb-1">₹{{ "%.2f"|format(result.data.loweractual | float(0)) }}</h5>
+            <small>Lower Actual PVC (C1)</small>
+          {% elif sc == "D1" %}
+            <h5 class="mb-1">₹{{ "%.2f"|format(result.data.lowercontractual | float(0)) }}</h5>
+            <small>Lower Contractual (D1)</small>
+          {% else %}
+            <h5 class="mb-1">—</h5><small>PVC Amount</small>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3 mb-2">
+      <div class="card bg-danger text-white h-100">
+        <div class="card-body py-3">
+          {% if _ldapply %}
+            {% if result.data.selectedscenario == "B2" %}
+              <h5 class="mb-1">₹{{ "%.2f"|format(result.data.ldamtcontractual | float(0)) }}</h5>
+              <small>LD Amount (on B2)</small>
+            {% else %}
+              <h5 class="mb-1">₹{{ "%.2f"|format(result.data.ldamtactual | float(0)) }}</h5>
+              <small>LD Amount (on A2)</small>
+            {% endif %}
+          {% else %}
+            <h5 class="mb-1">Nil</h5>
+            <small>LD Amount</small>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3 mb-2">
+      <div class="card bg-info text-white h-100">
+        <div class="card-body py-3">
+          <h3 class="mb-1">{{ dictGet(sc_names, result.data.selectedscenario, result.data.selectedscenario) | default("—") }}</h3>
+          <small>Selected Scenario</small>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── INPUTS & DATES ──────────────────────── -->
+  <div class="card mb-4 hide-in-print-raw">
+    <div class="card-header bg-secondary text-white">
+      <h6 class="mb-0"><i class="bi bi-input-cursor-text me-1"></i> Inputs &amp; Dates</h6>
+    </div>
+    <div class="card-body">
+      <div class="row">
+        <div class="col-md-6">
+          <table class="table table-sm table-bordered">
+            <thead class="table-light"><tr><th colspan="2" class="text-center">Commercial Details</th></tr></thead>
+            <tbody>
+              <tr><th>Basic Rate</th><td>₹{{ "%.2f"|format(data.basicrate | float(0)) }}</td></tr>
+              <tr><th>Quantity</th><td>{{ (data.quantity | float(0)) | int }}</td></tr>
+              <tr><th>Freight / Unit</th><td>₹{{ "%.2f"|format(data.freightrateperunit | float(0)) }}</td></tr>
+              <tr><th>Rate Applied</th><td>{{ data.rateapplied | default("—") }}</td></tr>
+              {% if result.data.tenderno %}<tr><th>Tender No</th><td>{{ result.data.tenderno }}</td></tr>{% endif %}
+              {% if result.data.pono %}<tr><th>PO No</th><td>{{ result.data.pono }}</td></tr>{% endif %}
+              {% if data.developmentaltender %}<tr><th>Developmental</th><td><span class="badge bg-info">Yes — No LD</span></td></tr>{% endif %}
+            </tbody>
+          </table>
+        </div>
+        <div class="col-md-6">
+          <table class="table table-sm table-bordered">
+            <thead class="table-light"><tr><th colspan="2" class="text-center">Date Details</th></tr></thead>
+            <tbody>
+              <tr><th>PVC Base Date</th><td>{{ data.pvcbasedate or "—" }}</td></tr>
+              <tr><th>Original DP</th><td>{{ data.origdp or "—" }}</td></tr>
+              <tr><th>Refixed DP</th><td>{{ data.refixeddp or "—" }}</td></tr>
+              <tr><th>Extended DP w/o LD</th><td>{{ data.extendeddp or "—" }}</td></tr>
+              <tr><th>Call / Inspection</th><td>{{ data.caldate or "—" }}</td></tr>
+              <tr><th>Supply Date</th><td>{{ data.supdate or "—" }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── LOWER RATE DETAILS ──────────────────── -->
+  {% set lowermodes = ["lower rate applicable within dp", "lower rate applicable","lower rate and ld comparison","lower rate with ld in further extension", "lower rate applicable beyond dp without ld", "lower rate applicable beyond dp with ld", "lower rate applicable in further dp extension with ld"] %}
+  {% if ratemode_str in lowermodes %}
+  <div class="card mb-4 hide-in-print-raw">
+    <div class="card-header bg-warning">
+      <h6 class="mb-0"><i class="bi bi-percent me-1"></i> Lower Rate Details</h6>
+    </div>
+    <div class="card-body">
+      <div class="row">
+        <div class="col-md-6">
+          <table class="table table-sm table-bordered">
+            <tbody>
+              <tr><th>Lower Basic Rate</th><td>₹{{ "%.2f"|format(data.lowerrate | float(0)) }}</td></tr>
+              <tr><th>Lower Freight / Unit</th><td>₹{{ "%.2f"|format(data.lowerfreight | float(0)) }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="col-md-6">
+          <table class="table table-sm table-bordered">
+            <tbody>
+              <tr><th>Lower Base Date</th><td>{{ data.lowerbasicdate or "—" }}</td></tr>
+              <tr><th>Applied Mode</th><td>{{ data.rateapplied }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ─── LD DETAILS ──────────────────────────── -->
+  {% if _ldapply %}
+  <div class="card mb-4 hide-in-print-raw">
+    <div class="card-header bg-danger text-white">
+      <h6 class="mb-0"><i class="bi bi-clock-history me-1"></i> Liquidated Damages (LD) Details</h6>
+    </div>
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-sm table-bordered text-center align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>Delay Days</th><th>Delay Weeks (Ceiling)</th><th>LD Rate (%)</th>
+              <th>LD on Actual PVC (₹)</th><th>LD on Contractual PVC (₹)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="fw-bold text-danger">{{ _lddays }}</td>
+              <td>{{ _ldweeks }}</td>
+              <td>{{ "%.2f"|format(_ldpct) }}</td>
+              <td class="text-danger fw-bold">₹{{ "%.2f"|format(result.data.ldamtactual | float(0)) }}</td>
+              <td class="text-danger fw-bold">₹{{ "%.2f"|format(result.data.ldamtcontractual | float(0)) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <small class="text-muted">Weeks = ceil(delay days / 7); LD Rate = min(weeks × 0.5, 10)%.</small>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ─── SCENARIO COMPARISON (IEEMA only) ────── -->
+  {% if result.scenarioamounts and not result.igbtvendordetails %}
+  <div class="card mb-4">
+    <div class="card-header bg-primary text-white">
+      <h6 class="mb-0"><i class="bi bi-table me-1"></i> Scenario-wise PVC Comparison</h6>
+    </div>
+    <div class="card-body table-responsive">
+      <table class="table table-bordered table-sm text-center align-middle">
+        <thead class="table-dark">
+          <tr>
+            <th>Scenario</th><th>Parameters</th><th>Gross PVC (₹)</th>
+            <th>LD (₹)</th><th>Net Payable (₹)</th><th>PVC per Set (₹)</th><th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% set sc_meta = [
+            ["A2","Base Rate, Call Date",result.data.pvcactual,result.data.ldamtactual,result.data.pvcactuallessldnew if result.data.pvcactuallessldnew != null else result.data.pvcactual,result.data.pvcperseta2],
+            ["B2","Base Rate, Scheduled DP",result.data.pvccontractual,result.data.ldamtcontractual,result.data.pvccontractuallessldnew if result.data.pvccontractuallessldnew != null else result.data.pvccontractual,result.data.pvcpersetb2],
+            ["C1","Lower Rate, Call Date",result.data.loweractual,0,result.data.loweractual,result.data.pvcpersetc1],
+            ["D1","Lower Rate, Scheduled DP",result.data.lowercontractual,0,result.data.lowercontractual,result.data.pvcpersetd1]
+          ] %}
+          {% for sc_id,sc_sub,gross,ld_amt,net,perset in sc_meta %}
+            {% if sc_id in showsc and (sc_id in ["A2","B2"] or sc_id in result.scenarioamounts) %}
+            <tr class="{% if result.data.selectedscenario == sc_id %}table-success fw-bold{% endif %}">
+              <td><strong>{{ dictGet(sc_names, sc_id, sc_id) }}</strong></td>
+              <td>
+                <small class="text-muted">{{ sc_sub }}</small>
+              </td>
+              <td>₹{{ "%.2f"|format(gross | float(0)) }}</td>
+              <td class="text-danger">
+                {% if _ldapply and sc_id in ["A2","B2"] and ld_amt %}₹{{ "%.2f"|format(ld_amt | float(0)) }}{% else %}—{% endif %}
+              </td>
+              <td>₹{{ "%.2f"|format(net | float(0)) }}</td>
+              <td>
+                {% if perset != null %}
+                  ₹{{ "%.2f"|format(perset | float(0)) }}
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+              <td>{% if result.data.selectedscenario == sc_id %}<span class="badge bg-success">SELECTED</span>{% endif %}</td>
+            </tr>
+            {% endif %}
+          {% endfor %}
+          <tr class="table-dark fw-bold">
+            <td colspan="4" class="text-end">Final Payable Amount</td>
+            <td class="text-success">₹{{ "%.2f"|format(result.data.fairprice | float(0)) }}</td>
+            <td></td>
+            <td><span class="badge bg-success fs-6">{{ dictGet(sc_names, result.data.selectedscenario, result.data.selectedscenario) | default("") }}</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ─── INDEX-WISE PVC (IEEMA) ──────────────── -->
+  {% if result.scenariodetails and not result.igbtvendordetails %}
+  <div class="card mb-4" id="ieemaIndexCard">
+    <div class="card-header bg-success text-white">
+      <h6 class="mb-0"><i class="bi bi-bar-chart-line me-1"></i> Index-wise PVC Details</h6>
+    </div>
+    <div class="card-body">
+      <ul class="nav nav-tabs mb-3" id="idxTabs" role="tablist">
+        {% set tabn = namespace(i=0) %}
+        {% for detail in result.scenariodetails %}
+          {% if detail.scenario in showsc %}
+            {% set _ = tabn.set("i", tabn.i + 1) %}
+            <button class="nav-link {% if tabn.i == 1 %}active{% endif %} {% if result.data.selectedscenario == detail.scenario %}fw-bold{% endif %}"
+              id="idx-tab-{{ detail.scenario }}" data-bs-toggle="tab"
+              data-bs-target="#idx-pane-{{ detail.scenario }}" type="button" role="tab">
+              {{ dictGet(sc_names, detail.scenario, detail.scenario) }}
+              {% if result.data.selectedscenario == detail.scenario %}
+              <span class="badge bg-success ms-1">Selected</span>
+              {% endif %}
+            </button>
+          {% endif %}
+        {% endfor %}
+      </ul>
+      <div class="tab-content" id="idxTabContent">
+        {% set panen = namespace(i=0) %}
+        {% for detail in result.scenariodetails %}
+          {% if detail.scenario in showsc %}
+            {% set _ = panen.set("i", panen.i + 1) %}
+            <div class="tab-pane fade {% if panen.i == 1 %}show active{% endif %}"
+              id="idx-pane-{{ detail.scenario }}" role="tabpanel">
+              <h5 class="print-raw-show fw-bold mt-3 mb-2 border-bottom pb-1">{{ dictGet(sc_names, detail.scenario, detail.scenario) }}</h5>
+              <div class="mb-2">
+                <span class="badge bg-secondary me-1">Base Month {{ detail.basemonth }}</span>
+                <span class="badge bg-secondary me-1">Current Month {{ detail.currentmonth }}</span>
+                <span class="badge bg-primary me-1">Total PVC {{ "%.4f"|format(detail.pvcpercent | float(0)) }}%</span>
+                <span class="badge bg-info text-dark me-1">PVC Per Set: ₹
+                  {% if detail.scenario == 'A2' %}{{ pyfmt("{:,.2f}", result.data.pvcperseta2 | float(0)) }}
+                  {% elif detail.scenario == 'B2' %}{{ pyfmt("{:,.2f}", result.data.pvcpersetb2 | float(0)) }}
+                  {% elif detail.scenario == 'C1' %}{% if result.data.pvcpersetc1 != null %}{{ pyfmt("{:,.2f}", result.data.pvcpersetc1 | float(0)) }}{% else %}—{% endif %}
+                  {% elif detail.scenario == 'D1' %}{% if result.data.pvcpersetd1 != null %}{{ pyfmt("{:,.2f}", result.data.pvcpersetd1 | float(0)) }}{% else %}—{% endif %}
+                  {% endif %}
+                </span>
+              </div>
+              <div class="table-responsive">
+                <table class="table table-sm table-bordered align-middle">
+                  <thead class="table-success text-center">
+                    <tr>
+                      <th>Index</th>
+                      <th>Base Value<br><small class="fw-normal">({{ detail.basemonth }})</small></th>
+                      <th>Current Value<br><small class="fw-normal">({{ detail.currentmonth }})</small></th>
+                      <th>Weight (%)</th>
+                      <th>Contribution (%)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for k in keys(detail) %}
+                      {% if k.endsWith("_base") %}
+                        {% set idx_key = k.slice(0, -5) %}
+                        {% set b   = detail[idx_key + "_base"] %}
+                        {% set c   = detail[idx_key + "_current"] %}
+                        {% set w   = detail[idx_key + "_weight"] %}
+                        {% set con = detail[idx_key + "_contributionpct"] %}
+                        {% set bm  = dictGet(detail, idx_key + "_actualbasemonth") or dictGet(detail, idx_key + "_basemonth") %}
+                        {% set cm  = dictGet(detail, idx_key + "_actualcurrentmonth") or dictGet(detail, idx_key + "_currentmonth") %}
+                        <tr>
+                          <td class="fw-bold text-center"><span class="badge bg-dark">{{ (idx_key | upper) }}</span></td>
+                          <td class="text-end">
+                            {% if b != null %}{{ "%.4f"|format(b | float(0)) }}{% else %}—{% endif %}
+                            {% if bm %}<br><small class="text-muted" style="font-size:11px;">{{ bm }}</small>{% endif %}
+                          </td>
+                          <td class="text-end">
+                            {% if c != null %}{{ "%.4f"|format(c | float(0)) }}{% else %}—{% endif %}
+                            {% if cm %}<br><small class="text-muted" style="font-size:11px;">{{ cm }}</small>{% endif %}
+                          </td>
+                          <td class="text-center">{% if w != null %}{{ w }}{% else %}—{% endif %}</td>
+                          <td class="text-end fw-bold">
+                            {% if con != null %}
+                              {% set con_f = con | float(0) %}
+                              {% if con_f > 0 %}<span class="text-success">{% elif con_f < 0 %}<span class="text-danger">{% else %}<span>{% endif %}
+                              {{ "%.4f"|format(con_f) }}</span>
+                            {% else %}—{% endif %}
+                          </td>
+                        </tr>
+                      {% endif %}
+                    {% endfor %}
+                    <tr class="table-warning fw-bold">
+                      <td colspan="4" class="text-end">Total PVC %</td>
+                      <td class="text-end">{{ "%.4f"|format(detail.pvcpercent | float(0)) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="mt-3" style="max-width: 400px; margin-left: auto;">
+                <table class="table table-bordered table-sm align-middle">
+                  <tbody>
+                    <tr class="table-info">
+                      <th>Total PVC %</th>
+                      <td class="text-end fw-bold">{{ "%.4f"|format(detail.pvcpercent | float(0)) }}%</td>
+                    </tr>
+                    <tr class="table-primary">
+                      <th>PVC Amount Per Set (₹)</th>
+                      <td class="text-end fw-bold">
+                        {% if detail.scenario == 'A2' %}{{ pyfmt("{:,.2f}", result.data.pvcperseta2 | float(0)) }}
+                        {% elif detail.scenario == 'B2' %}{{ pyfmt("{:,.2f}", result.data.pvcpersetb2 | float(0)) }}
+                        {% elif detail.scenario == 'C1' %}{% if result.data.pvcpersetc1 != null %}{{ pyfmt("{:,.2f}", result.data.pvcpersetc1 | float(0)) }}{% else %}—{% endif %}
+                        {% elif detail.scenario == 'D1' %}{% if result.data.pvcpersetd1 != null %}{{ pyfmt("{:,.2f}", result.data.pvcpersetd1 | float(0)) }}{% else %}—{% endif %}
+                        {% endif %}
+                      </td>
+                    </tr>
+                    <tr class="table-success">
+                      <th>Total Gross PVC Amount (₹)</th>
+                      <td class="text-end fw-bold">
+                        {% if detail.scenario == 'A2' %}{{ pyfmt("{:,.2f}", result.data.pvcactual | float(0)) }}
+                        {% elif detail.scenario == 'B2' %}{{ pyfmt("{:,.2f}", result.data.pvccontractual | float(0)) }}
+                        {% elif detail.scenario == 'C1' %}{% if result.data.loweractual != null %}{{ pyfmt("{:,.2f}", result.data.loweractual | float(0)) }}{% else %}—{% endif %}
+                        {% elif detail.scenario == 'D1' %}{% if result.data.lowercontractual != null %}{{ pyfmt("{:,.2f}", result.data.lowercontractual | float(0)) }}{% else %}—{% endif %}
+                        {% endif %}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          {% endif %}
+        {% endfor %}
+      </div>
+
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ─── IGBT VENDOR-WISE PVC ─────────────────── -->
+  {% if result.igbtvendordetails %}
+  {% set igbt_sc_order = ["A2", "B2", "C1", "D1"] %}
+  {% set igbt_avail_sc = result.igbtvendordetails | map(attribute="scenario") | unique | list %}
+  <div class="card shadow mb-4 border-0" id="igbtVendorCard">
+    <div class="card-header bg-dark text-white py-3">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h5 class="mb-0"><i class="bi bi-diagram-3-fill me-2"></i> IGBT Propulsion — Vendor-wise PVC Breakdown</h5>
+        <span class="badge bg-success fs-6">
+          Selected: {{ dictGet(sc_names, result.data.selectedscenario, result.data.selectedscenario) | default("") }}
+          &nbsp;| Fair Price: ₹{{ "%.2f"|format(result.data.fairprice | float(0)) }}
+        </span>
+      </div>
+    </div>
+    <div class="card-body p-0">
+      <ul class="nav nav-tabs px-3 pt-3" id="igbtTabs" role="tablist">
+        {% set igbttab = namespace(first=true) %}
+        {% for sc in igbt_sc_order %}
+          {% if sc in showsc %}
+            {% set sc_has_vendors = sc in igbt_avail_sc %}
+            {% if sc_has_vendors %}
+            <button class="nav-link {% if igbttab.first %}active{% endif %} {% if result.data.selectedscenario == sc %}fw-bold{% endif %}"
+              id="igbt-tab-{{ sc }}" data-bs-toggle="tab" data-bs-target="#igbt-pane-{{ sc }}" type="button" role="tab">
+              {{ dictGet(sc_names, sc, sc) }}
+              {% if result.data.selectedscenario == sc %}<span class="badge bg-success ms-1">Selected</span>{% endif %}
+              <small class="d-block text-muted" style="font-size:10px;">
+                {% if sc == "A2" %}Base Rate, Call Date
+                {% elif sc == "B2" %}Base Rate, Sched. DP
+                {% elif sc == "C1" %}Lower Rate, Call Date
+                {% elif sc == "D1" %}Lower Rate, Sched. DP{% endif %}
+              </small>
+            </button>
+            {% set _ = igbttab.set("first", false) %}
+            {% endif %}
+          {% endif %}
+        {% endfor %}
+      </ul>
+
+      <div class="tab-content p-3" id="igbtTabContent">
+        {% set igbtpane = namespace(first=true) %}
+        {% for sc in igbt_sc_order %}
+          {% if sc in showsc %}
+            {% set sc_has_vendors = sc in igbt_avail_sc %}
+            {% if sc_has_vendors %}
+
+            {% set scrows = result.igbtvendordetails | selectattr("scenario","equalto",sc) | list %}
+            {% set ns = namespace(minpvc=None, minvendor=None) %}
+            {% for vrow in scrows %}
+              {% set _vtpvc = vrow.totalpvc | float(0) %}
+              {% if ns.minpvc == null or _vtpvc < ns.minpvc %}
+                {% set _ = ns.set("minpvc", _vtpvc) %}
+                {% set _ = ns.set("minvendor", vrow.vendor) %}
+              {% endif %}
+            {% endfor %}
+            <div class="tab-pane fade {% if igbtpane.first %}show active{% endif %}" id="igbt-pane-{{ sc }}" role="tabpanel">
+              {% set _ = igbtpane.set("first", false) %}
+              
+              <h6 class="fw-bold mb-2 mt-1">Vendor-wise PVC Summary ({{ dictGet(sc_names, sc, sc) }})
+                <small class="text-muted fw-normal ms-2">Minimum PVC across vendors is payable.</small>
+              </h6>
+              <div class="table-responsive mb-4">
+                <table class="table table-bordered table-sm table-hover align-middle text-nowrap">
+                  <thead class="table-dark text-center">
+                    <tr>
+                      <th rowspan="2" class="align-middle">Vendor</th>
+                      <th rowspan="2" class="align-middle">PO No</th>
+                      <th rowspan="2" class="align-middle">Currency</th>
+                      <th rowspan="2" class="align-middle">Basic Rate</th>
+                      <th rowspan="2" class="align-middle">CIF</th>
+                      <th rowspan="2" class="align-middle">Base Duty</th>
+                      <th rowspan="2" class="align-middle">Indigenous</th>
+                      <th colspan="3" class="text-center border-start">PVC Components</th>
+                      <th rowspan="2" class="align-middle border-start">Base Month</th>
+                      <th rowspan="2" class="align-middle">Current Month</th>
+                    </tr>
+                    <tr>
+                      <th class="border-start">P1 (Indigenous)</th>
+                      <th>P2 (Imported CIF)</th>
+                      <th class="table-warning">Total PVC</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for vrow in scrows %}
+                    {% set _vp1  = vrow.p1       | float(0) %}
+                    {% set _vp2  = vrow.p2       | float(0) %}
+                    {% set _vpvc = vrow.totalpvc  | float(0) %}
+                    <tr class="{% if vrow.vendor == ns.minvendor %}table-success{% endif %}">
+                      <td class="fw-bold">{{ vrow.vendor }}
+                        {% if vrow.vendor == ns.minvendor %}<span class="badge bg-success ms-1">Min PVC</span>{% endif %}
+                      </td>
+                      <td class="text-center">{{ vrow.pono or "—" }}</td>
+                      <td class="text-center"><span class="badge bg-secondary">{{ vrow.currency }}</span></td>
+                      <td class="text-end">{{ pyfmt("{:,.2f}", vrow.rate | float(0)) }}</td>
+                      <td class="text-end">{{ pyfmt("{:,.2f}", vrow.cif | float(0)) }}</td>
+                      <td class="text-end">{{ pyfmt("{:,.2f}", vrow.baseduty | float(0)) }}</td>
+                      <td class="text-end">{{ pyfmt("{:,.2f}", vrow.indigenous | float(0)) }}</td>
+                      <td class="text-end border-start fw-bold {% if _vp1 < 0 %}text-danger{% elif _vp1 > 0 %}text-success{% endif %}">{{ pyfmt("{:,.2f}", _vp1) }}</td>
+                      <td class="text-end fw-bold {% if _vp2 < 0 %}text-danger{% elif _vp2 > 0 %}text-success{% endif %}">{{ pyfmt("{:,.2f}", _vp2) }}</td>
+                      <td class="text-end table-warning fw-bold {% if _vpvc < 0 %}text-danger{% elif _vpvc > 0 %}text-success{% endif %}">{{ pyfmt("{:,.2f}", _vpvc) }}</td>
+                      <td class="text-center border-start">{{ vrow.basemonth }}</td>
+                      <td class="text-center">{{ vrow.currentmonth }}</td>
+                    </tr>
+                    {% endfor %}
+                    <tr class="table-dark fw-bold">
+                      <td colspan="9" class="text-end">Minimum PVC across vendors ({{ dictGet(sc_names, sc, sc) }})</td>
+                      <td class="text-end table-warning">{{ pyfmt("{:,.2f}", ns.minpvc | float(0)) }}</td>
+                      <td colspan="2"></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {% set vendors_in_sc = scrows | map(attribute="vendor") | unique | list %}
+              <h6 class="fw-bold mb-2">Index-wise Detail — All Vendors ({{ dictGet(sc_names, sc, sc) }})</h6>
+              <ul class="nav nav-pills mb-3" id="vpills-{{ sc }}" role="tablist">
+                {% for vname in vendors_in_sc %}
+                <button class="nav-link {% if loop.first %}active{% endif %} {% if vname == ns.minvendor %}border border-success{% endif %}"
+                  id="vpill-{{ sc }}-{{ loop.index }}" data-bs-toggle="pill"
+                  data-bs-target="#vpane-{{ sc }}-{{ loop.index }}" type="button" role="tab">
+                  {{ vname }}{% if vname == ns.minvendor %}<span class="badge bg-success ms-1">Min</span>{% endif %}
+                </button>
+                {% endfor %}
+              </ul>
+              <div class="tab-content mb-3" id="vpillContent-{{ sc }}">
+                {% for vname in vendors_in_sc %}
+                {% set vidxrows = result.igbtindexdetails | selectattr("scenario","equalto",sc) | selectattr("vendor","equalto",vname) | list %}
+                <div class="tab-pane fade {% if loop.first %}show active{% endif %}" id="vpane-{{ sc }}-{{ loop.index }}" role="tabpanel">
+                  <h6 class="print-raw-show fw-bold mt-2 mb-2 text-primary">Index Detail: {{ vname }} ({{ dictGet(sc_names, sc, sc) }})</h6>
+                  {% set vr_list = result.igbtvendordetails | selectattr("scenario","equalto",sc) | selectattr("vendor","equalto",vname) | list %}
+                  {% if vr_list %}
+                  <div class="mb-2">
+                    {% set _v_basic = vr_list[0].basicrate | float(0) %}
+                    {% set _v_pct = ((vr_list[0].totalpvc | float(0)) / _v_basic * 100) if _v_basic != 0 else 0 %}
+                    <span class="badge bg-primary me-1">Total PVC {{ "%.4f"|format(_v_pct) }}%</span>
+                    <span class="badge bg-info text-dark me-1">PVC Per Set: ₹{{ pyfmt("{:,.2f}", vr_list[0].totalpvc | float(0)) }}</span>
+                  </div>
+                  {% endif %}
+                  {% if vidxrows %}
+                  <div class="table-responsive">
+                    <table class="table table-bordered table-sm align-middle">
+                      <thead class="table-secondary text-center">
+                        <tr><th>Parameter</th><th>Description</th><th>Base Month</th><th>Base Value</th><th>Current Month</th><th>Current Value</th><th>Ratio</th><th>Movement</th></tr>
+                      </thead>
+                      <tbody>
+                        {% for irow in vidxrows %}
+                        {% set _ibv = irow.basevalue    | float(0) %}
+                        {% set _icv = irow.currentvalue | float(0) %}
+                        {% set ratio = (_icv / _ibv) if (_ibv != 0 and irow.basevalue != null and irow.currentvalue != null) else none %}
+                        <tr>
+                          <td class="fw-bold text-center"><span class="badge bg-dark">{{ irow.parameter }}</span></td>
+                          <td>{{ irow.label }}</td>
+                          <td class="text-center text-muted">{{ irow.actualbasemonth | default(irow.basemonth, true) }}</td>
+                          <td class="text-end fw-bold">{{ pyfmt("{:,.4f}", _ibv) }}</td>
+                          <td class="text-center text-muted">{{ irow.actualcurrentmonth | default(irow.currentmonth, true) }}</td>
+                          <td class="text-end fw-bold">
+                            {% if ratio != null %}
+                              <span class="{% if ratio > 1 %}text-danger{% elif ratio < 1 %}text-success{% endif %}">{{ pyfmt("{:,.4f}", _icv) }}</span>
+                            {% else %}{{ pyfmt("{:,.4f}", _icv) }}{% endif %}
+                          </td>
+                          <td class="text-end fw-bold">
+                            {% if ratio != null %}
+                              <span class="{% if ratio > 1 %}text-danger{% elif ratio < 1 %}text-success{% endif %}">{{ pyfmt("{:.4f}", ratio) }}</span>
+                            {% else %}—{% endif %}
+                          </td>
+                          <td class="text-center">
+                            {% if ratio != null %}
+                              {% if ratio > 1 %}<span class="badge bg-danger">▲ {{ pyfmt("{:.2f}", (ratio-1)*100) }}%</span>
+                              {% elif ratio < 1 %}<span class="badge bg-success">▼ {{ pyfmt("{:.2f}", (1-ratio)*100) }}%</span>
+                              {% else %}<span class="badge bg-secondary">No Change</span>{% endif %}
+                            {% else %}<span class="badge bg-secondary">—</span>{% endif %}
+                          </td>
+                        </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                  {% else %}
+                  <div class="alert alert-warning py-2">No index detail rows for <strong>{{ vname }}</strong> ({{ dictGet(sc_names, sc, sc) }}).</div>
+                  {% endif %}
+                </div>
+                {% endfor %}
+              </div>
+            </div>
+
+            {% endif %}{# end sc_has_vendors #}
+          {% endif %}{# end sc in showsc #}
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ─── ACTION BUTTONS ──────────────────────── -->
+  <div class="text-center mb-4 no-print">
+    <button type="button" class="btn btn-outline-secondary me-2" onclick="window.history.back()">
+      <i class="bi bi-arrow-left me-1"></i> Back
+    </button>
+    <a href="{{ url_for('pvc.calculator') }}" class="btn btn-secondary me-2">
+      <i class="bi bi-calculator me-1"></i> New Calculation
+    </a>
+    <button onclick="openPrintReport()" class="btn btn-primary me-2">
+      <i class="bi bi-printer me-1"></i> Print / PDF
+    </button>
+    <button onclick="openPrintReport(true)" class="btn btn-warning me-2 text-dark">
+      <i class="bi bi-file-earmark-text me-1"></i> Print Summary
+    </button>
+    <button onclick="printAsItIs()" class="btn btn-info me-2 text-white">
+      <i class="bi bi-printer me-1"></i> Print
+    </button>
+    {% if calcid %}
+    <a href="{{ url_for('pvc.export_calc_excel', calcid=calcid) }}" class="btn btn-success">
+      <i class="bi bi-file-earmark-excel me-1"></i> Download Excel
+    </a>
+    {% endif %}
+  </div>
+
+  <!-- ─── FOOTNOTE ────────────────────────────── -->
+  <div class="mb-5" style="font-size:11px;">
+    <table width="100%">
+      <tr><td style="background:#fff3cd;border:1px solid #ffeeba;padding:6px;font-weight:bold;">
+        Note: This application should be used for cross-verification only. Final PVC as per applicable contract clause shall prevail.
+      </td></tr>
+    </table>
+  </div>
+
+  {# ══════════════════════════════════════════════════════════════════════
+     PRINT REPORT
+  ══════════════════════════════════════════════════════════════════════ #}
+
+  {% set rp = (data.rateapplied or "") | lower | trim %}
+  {% if rp in ["supply before due date", "supply within original dp or refixed dp"] %}{% set showsc_print = ["A2"] %}
+  {% elif rp == "lower rate applicable within dp" %}{% set showsc_print = ["A2", "C1"] %}
+  {% elif rp in ["supply after due date", "supply beyond original dp or refixed dp"] %}{% set showsc_print = ["A2", "B2"] %}
+  {% else %}
+    {% if d1_applicable %}
+      {% set showsc_print = ["A2", "B2", "C1", "D1"] %}
+    {% else %}
+      {% set showsc_print = ["A2", "B2", "C1"] %}
+    {% endif %}
+  {% endif %}
+
+  <div id="printReport">
+
+  {# ═══════════════════════════════════════════
+     BRANCH A — IGBT print pages
+  ════════════════════════════════════════════ #}
+  {% if result.igbtvendordetails %}
+
+    {% set igbt_sc_order = ["A2", "B2", "C1", "D1"] %}
+    {% set igbt_avail_sc = result.igbtvendordetails | map(attribute="scenario") | unique | list %}
+    {% set _a2_rows      = result.igbtvendordetails | selectattr("scenario","equalto","A2") | list %}
+    {% set seen_vendors  = result.igbtvendordetails | map(attribute="vendor") | unique | list %}
+    {% set _qty   = data.quantity           | float(1) %}
+    {% set _br    = data.basicrate          | float(0) %}
+    {% set _frt   = data.freightrateperunit | float(0) * _qty %}
+    {% set _lr    = data.lowerrate          | float(0) %}
+    {% set _lfrt  = data.lowerfreight       | float(0) * _qty %}
+    {% set _GST   = 1.18 %}
+    {% set _ld_a2 = result.data.ldamtactual      | float(0) %}
+    {% set _ld_b2 = result.data.ldamtcontractual | float(0) %}
+
+    {# ══ PRE-PASS: per-scenario min & overall winner. ══ #}
+    {% set ns_min = namespace(
+         a2_net=None, a2_vendor=None,
+         b2_net=None, b2_vendor=None,
+         c1_net=None, c1_vendor=None,
+         d1_net=None, d1_vendor=None,
+         best_net=None, best_sc=None, best_vendor=None
+    ) %}
+
+    {% for sc in igbt_sc_order %}
+      {% if sc in igbt_avail_sc and sc in showsc_print %}
+        {% set scrows_pre = result.igbtvendordetails | selectattr("scenario","equalto",sc) | list %}
+        {% for vrow in scrows_pre %}
+          {% set _vtpvc = vrow.totalpvc | float(0) %}
+          {% if sc in ["A2","B2"] %}
+            {% set _g = (_br * _qty + _vtpvc * _qty + _frt) * _GST %}
+          {% else %}
+            {% set _g = (_lr  * _qty + _vtpvc * _qty + _lfrt) * _GST %}
+          {% endif %}
+          {% set _ld_p = _ld_a2 if (sc=="A2" and _ldapply) else (_ld_b2 if (sc=="B2" and _ldapply) else 0) %}
+          {% set _net_p = _g - _ld_p %}
+          {% if sc == "A2" %}
+            {% if ns_min.a2_net == null or _net_p < ns_min.a2_net %}
+              {% set _ = ns_min.set("a2_net", _net_p) %}{% set _ = ns_min.set("a2_vendor", vrow.vendor) %}
+            {% endif %}
+          {% elif sc == "B2" %}
+            {% if ns_min.b2_net == null or _net_p < ns_min.b2_net %}
+              {% set _ = ns_min.set("b2_net", _net_p) %}{% set _ = ns_min.set("b2_vendor", vrow.vendor) %}
+            {% endif %}
+          {% elif sc == "C1" %}
+            {% if ns_min.c1_net == null or _net_p < ns_min.c1_net %}
+              {% set _ = ns_min.set("c1_net", _net_p) %}{% set _ = ns_min.set("c1_vendor", vrow.vendor) %}
+            {% endif %}
+          {% elif sc == "D1" %}
+            {% if ns_min.d1_net == null or _net_p < ns_min.d1_net %}
+              {% set _ = ns_min.set("d1_net", _net_p) %}{% set _ = ns_min.set("d1_vendor", vrow.vendor) %}
+            {% endif %}
+          {% endif %}
+          {% if ns_min.best_net == null or _net_p < ns_min.best_net %}
+            {% set _ = ns_min.set("best_net", _net_p) %}
+            {% set _ = ns_min.set("best_sc", sc) %}
+            {% set _ = ns_min.set("best_vendor", vrow.vendor) %}
+          {% endif %}
+        {% endfor %}
+      {% endif %}
+    {% endfor %}
+
+    {# PAGE 1 — FAIR PRICE SUMMARY SHEET #}
+    <div class="print-page" id="summarySheetPage">
+
+      <div class="pr-title">
+        PVC FAIR PRICE SUMMARY — IGBT PROPULSION SYSTEM<br>
+        <span style="font-size:10pt;font-weight:normal;">
+          Chittaranjan Locomotive Works &nbsp;|&nbsp; Net Fair Price After LD Deduction — All Vendors &amp; Scenarios
+        </span>
+      </div>
+
+      <table class="pr-meta">
+        <tr>
+          <td class="pr-lbl">Customer:</td><td>Chittaranjan Locomotive Works (CLW)</td>
+          <td class="pr-lbl">Calc ID:</td><td>{{ calcid }}</td>
+        </tr>
+        <tr>
+          <td class="pr-lbl">Item / Product:</td>
+          <td>{{ item }} — IGBT Based 3-Phase Drive Propulsion</td>
+          <td class="pr-lbl">Rate Applied:</td><td>{{ data.rateapplied or "—" }}</td>
+        </tr>
+        <tr>
+          <td class="pr-lbl">User:</td><td>{{ current_user.username }}</td>
+          <td class="pr-lbl">Call / Inspection Date:</td><td>{{ data.caldate or "—" }}</td>
+        </tr>
+        <tr>
+          <td class="pr-lbl">Basic Rate (₹):</td>
+          <td>{{ pyfmt("{:,.2f}", _br) }}</td>
+          <td class="pr-lbl">Supply Date:</td><td>{{ data.supdate or "—" }}</td>
+        </tr>
+        <tr>
+          <td class="pr-lbl">Quantity:</td>
+          <td>{{ _qty | int }}</td>
+          <td class="pr-lbl">Freight / Unit (₹):</td>
+          <td>{{ pyfmt("{:,.2f}", data.freightrateperunit | float(0)) }}</td>
+        </tr>
+        <tr>
+          <td class="pr-lbl">Original DP:</td><td>{{ data.origdp or "—" }}</td>
+          <td class="pr-lbl">Refixed DP:</td><td>{{ data.refixeddp or "—" }}</td>
+        </tr>
+        <tr>
+          <td class="pr-lbl">Extended DP w/o LD:</td><td>{{ data.extendeddp or "—" }}</td>
+          <td class="pr-lbl">PVC Base Date:</td><td>{{ data.pvcbasedate or "—" }}</td>
+        </tr>
+        {% if result.data.pono %}
+        <tr><td class="pr-lbl">CLW PO No.:</td><td colspan="3">{{ result.data.pono }}</td></tr>
+        {% endif %}
+        {% if result.data.tenderno %}
+        <tr><td class="pr-lbl">Tender No.:</td><td colspan="3">{{ result.data.tenderno }}</td></tr>
+        {% endif %}
+        {% if data.developmentaltender %}
+        <tr>
+          <td class="pr-lbl">Developmental:</td>
+          <td colspan="3"><strong>Yes — No Liquidated Damages applicable.</strong></td>
+        </tr>
+        {% endif %}
+      </table>
+
+      {% if _ldapply %}
+      <div style="border:1.5px solid #c0392b;padding:5px 10px;margin:6px 0;background:#fef9f9;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
+        <span style="font-weight:bold;color:#c0392b;font-size:9.5pt;">LIQUIDATED DAMAGES APPLICABLE &nbsp;|&nbsp;</span>
+        Delay: <strong>{{ _lddays | int }} days</strong>
+        → {{ _ldweeks | int }} weeks (ceiling)
+        → LD Rate: <strong>{{ "%.2f"|format(_ldpct) }}%</strong>
+        &nbsp;|&nbsp;
+        LD on Actual PVC: <strong style="color:#c0392b;">₹ {{ pyfmt("{:,.2f}", _ld_a2) }}</strong>
+        &nbsp;
+        LD on Contractual PVC: <strong style="color:#c0392b;">₹ {{ pyfmt("{:,.2f}", _ld_b2) }}</strong>
+        <br>
+        <span style="font-size:8pt;color:#666;">LD deducted from Actual PVC &amp; Contractual PVC only. Lower Rate scenarios compared without additional LD deduction.
+        </span>
+      </div>
+      {% else %}
+      <div style="border:1px solid #27ae60;padding:4px 10px;margin:6px 0;background:#f0fff4;font-size:9pt;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
+        <strong style="color:#1a7a40;">NO LIQUIDATED DAMAGES</strong> — Supply within scheduled delivery period, developmental tender, or LD waived.
+      </div>
+      {% endif %}
+
+      <div class="pr-sec" style="margin-top:10px;">
+        FAIR PRICE COMPARISON MATRIX — ALL VENDORS × ALL SCENARIOS &nbsp;(₹, incl. GST @18%)
+        <span style="font-weight:normal;font-size:7.5pt;margin-left:6px;">
+          <span style="background:#ffc107;padding:0 4px;border-radius:2px;-webkit-print-color-adjust:exact;print-color-adjust:exact;">Gold ✓</span> = Selected Fair Price &nbsp;
+          <span style="background:#d4edda;padding:0 4px;border-radius:2px;-webkit-print-color-adjust:exact;print-color-adjust:exact;">Green ★</span> = Scenario min
+        </span>
+      </div>
+
+      <table style="width:100%;border-collapse:collapse;font-size:9.5pt;margin-bottom:6px;">
+        <thead>
+          <tr style="background:#1a1a1a;color:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
+            <th rowspan="2" style="padding:5px 8px;border:1.5px solid #333;text-align:left;vertical-align:middle;width:18%;font-size:9pt;">
+              VENDOR
+            </th>
+            {% for sc in igbt_sc_order %}
+              {% if sc in showsc_print %}
+                {% set sc_printable = (sc in igbt_avail_sc) %}
+                {% if sc_printable %}
+                {% set is_sel_sc = (result.data.selectedscenario == sc) %}
+                <th style="padding:5px 8px;border:1.5px solid #333;text-align:center;{% if is_sel_sc %}background:#4a3800;{% endif %}-webkit-print-color-adjust:exact;print-color-adjust:exact;">
+                  <span style="font-size:11pt;">{{ dictGet(sc_names, sc, sc) }}</span>{% if is_sel_sc %}&nbsp;✓{% endif %}
+                  <br>
+                  <span style="font-size:7.5pt;font-weight:normal;">
+                    {% if sc=="A2" %}Base Rate · Actual (Call) Date
+                    {% elif sc=="B2" %}Base Rate · Scheduled DP
+                    {% elif sc=="C1" %}Lower Rate · Actual (Call) Date
+                    {% elif sc=="D1" %}Lower Rate · Scheduled DP{% endif %}
+                  </span>
+                  <br>
+                  <span style="font-size:7pt;font-weight:normal;opacity:0.85;">
+                    {% if sc in ["A2","B2"] %}
+                      Rate ₹{{ pyfmt("{:,.0f}", _br) }} · Frt ₹{{ pyfmt("{:,.0f}", _frt) }}
+                      {% if _ldapply and sc in ["A2","B2"] %} · LD {{ "%.1f"|format(_ldpct) }}%{% endif %}
+                    {% else %}
+                      Rate ₹{{ pyfmt("{:,.0f}", _lr) }} · Frt ₹{{ pyfmt("{:,.0f}", _lfrt) }} · No LD
+                    {% endif %}
+                  </span>
+                </th>
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+          </tr>
+          <tr style="background:#2d2d2d;color:#ccc;font-size:7pt;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
+            {% for sc in igbt_sc_order %}
+              {% if sc in showsc_print %}
+                {% set sc_printable = (sc in igbt_avail_sc) %}
+                {% if sc_printable %}
+                <th style="padding:2px 5px;border:1px solid #444;text-align:center;">
+                    Fair Price (₹) after LD
+                    {% if _ldapply and sc in ["A2","B2"] %}
+                      <br><span style="color:#f8a5a5;">− ₹{{ pyfmt("{:,.0f}", _ld_a2 if sc=="A2" else _ld_b2) }} LD</span>
+                    {% else %}<br><span style="color:#aed6a0;">No LD</span>{% endif %}
+                </th>
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for v in seen_vendors %}
+          {% set row_is_winner = (v == ns_min.best_vendor) %}
+          <tr>
+            <td style="padding:5px 8px;border:1.5px solid #ccc;font-weight:bold;font-size:9pt;vertical-align:middle;{% if row_is_winner %}background:#fff8dc;{% endif %}-webkit-print-color-adjust:exact;print-color-adjust:exact;">
+              {{ v }}
+              {% if row_is_winner %}
+              <br><span style="font-size:7pt;font-weight:normal;color:#856404;">SELECTED</span>
+              {% endif %}
+            </td>
+            {% for sc in igbt_sc_order %}
+              {% if sc in showsc_print %}
+                {% if sc in igbt_avail_sc %}
+                  {% set vrl = result.igbtvendordetails | selectattr("vendor","equalto",v) | selectattr("scenario","equalto",sc) | list %}
+                  {% if vrl %}
+                    {% set vrow = vrl[0] %}
+                    {% set raw  = vrow.totalpvc | float(0) %}
+                    {% if sc in ["A2","B2"] %}
+                      {% set gross_cell = (_br * _qty + raw * _qty + _frt) * _GST %}
+                      {% set ld_cell    = _ld_a2 if (sc=="A2" and _ldapply) else (_ld_b2 if (sc=="B2" and _ldapply) else 0) %}
+                    {% else %}
+                      {% set gross_cell = (_lr * _qty + raw * _qty + _lfrt) * _GST %}
+                      {% set ld_cell    = 0 %}
+                    {% endif %}
+                    {% set net_cell = gross_cell - ld_cell %}
+                    {% set sc_mn = ns_min.a2_net if sc=="A2" else (ns_min.b2_net if sc=="B2" else (ns_min.c1_net if sc=="C1" else ns_min.d1_net)) %}
+                    {% set is_sc_min = (sc_mn != null and (net_cell - sc_mn)|abs < 0.005) %}
+                    {% set is_winner = (v == ns_min.best_vendor and sc == ns_min.best_sc) %}
+                    <td style="padding:6px 8px;border:1.5px solid #ccc;text-align:center;vertical-align:middle;
+                      {% if is_winner %}background:#ffc107;{% elif is_sc_min %}background:#d4edda;{% elif row_is_winner %}background:#fffdf0;{% endif %}
+                      -webkit-print-color-adjust:exact;print-color-adjust:exact;">
+                      <div style="font-family:'Courier New',monospace;font-weight:bold;
+                        font-size:{% if is_winner %}12pt{% elif is_sc_min %}10.5pt{% else %}9.5pt{% endif %};
+                        color:{% if is_winner %}#000{% elif is_sc_min %}#155724{% else %}#1a3a6a{% endif %};">
+                        ₹{{ pyfmt("{:,.2f}", net_cell) }}{% if is_winner %}&nbsp;✓{% elif is_sc_min %}&nbsp;★{% endif %}
+                      </div>
+                      {% if _ldapply and sc in ["A2","B2"] and ld_cell > 0 %}
+                      <div style="font-size:7pt;color:#c0392b;margin-top:2px;">
+                        Gross: ₹{{ pyfmt("{:,.2f}", gross_cell) }}<br>
+                        − LD: ₹{{ pyfmt("{:,.2f}", ld_cell) }}
+                      </div>
+                      {% else %}
+                      <div style="font-size:7pt;color:#888;margin-top:2px;">No LD</div>
+                      {% endif %}
+                      {% if is_winner %}
+                      <div style="margin-top:3px;">
+                        <span style="background:#155724;color:#fff;padding:1px 5px;border-radius:3px;font-size:7.5pt;font-weight:bold;-webkit-print-color-adjust:exact;print-color-adjust:exact;">FAIR PRICE ✓</span>
+                      </div>
+                      {% elif is_sc_min %}
+                      <div style="margin-top:3px;">
+                        <span style="background:#856404;color:#fff;padding:1px 4px;border-radius:3px;font-size:7pt;-webkit-print-color-adjust:exact;print-color-adjust:exact;">{{ dictGet(sc_names, sc, sc) | upper }} MIN ★</span>
+                      </div>
+                      {% endif %}
+                    </td>
+                  {% else %}
+                    <td style="padding:5px 8px;border:1px solid #eee;text-align:center;color:#bbb;font-size:8pt;">—</td>
+                  {% endif %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+          </tr>
+          {% endfor %}
+
+          <tr style="background:#155724;color:#fff;font-weight:bold;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
+            <td style="padding:5px 8px;border:1.5px solid #0a3d1f;font-size:8.5pt;vertical-align:middle;">
+              MIN FAIR PRICE<br>
+              <span style="font-size:7pt;font-weight:normal;color:#aed6a0;">per PVC type</span>
+            </td>
+            {% for sc in igbt_sc_order %}
+              {% if sc in showsc_print %}
+                {% set sc_printable = (sc in igbt_avail_sc) %}
+                {% if sc_printable %}
+                {% set sc_mn_val = ns_min.a2_net if sc=="A2" else (ns_min.b2_net if sc=="B2" else (ns_min.c1_net if sc=="C1" else ns_min.d1_net)) %}
+                {% set sc_mn_v   = ns_min.a2_vendor if sc=="A2" else (ns_min.b2_vendor if sc=="B2" else (ns_min.c1_vendor if sc=="C1" else ns_min.d1_vendor)) %}
+                {% set is_sel_sc = (result.data.selectedscenario == sc) %}
+                <td style="padding:5px 8px;border:1.5px solid #0a3d1f;text-align:center;vertical-align:middle;
+                  {% if is_sel_sc %}background:#ffc107;color:#000;{% endif %}
+                  -webkit-print-color-adjust:exact;print-color-adjust:exact;">
+                  <div style="font-family:'Courier New',monospace;font-weight:bold;font-size:{% if is_sel_sc %}11pt{% else %}10pt{% endif %};">
+                    ₹{{ pyfmt("{:,.2f}", sc_mn_val | float(0)) }}{% if is_sel_sc %}&nbsp;✓{% endif %}
+                  </div>
+                  <div style="font-size:7pt;{% if not is_sel_sc %}color:#aed6a0;{% else %}color:#333;{% endif %}margin-top:2px;">
+                    {{ sc_mn_v or "—" }}
+                  </div>
+                </td>
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+          </tr>
+        </tbody>
+      </table>
+
+      <table style="width:100%;border-collapse:collapse;margin-top:4px;">
+        <tr style="background:#0a2a00;color:#ffc107;font-weight:bold;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
+          <td style="padding:8px 12px;border:2px solid #071500;text-align:left;font-size:10pt;width:60%;">
+            FINAL PAYABLE FAIR PRICE &nbsp;
+            <span style="font-size:8.5pt;font-weight:normal;color:#ffe;">
+              ({{ dictGet(sc_names, result.data.selectedscenario, result.data.selectedscenario) | default("—") }}, Vendor: {{ ns_min.best_vendor or "—" }}, incl. GST @18%{% if _ldapply %}, after LD deduction{% endif %})
+            </span>
+          </td>
+          <td style="padding:8px 12px;border:2px solid #071500;text-align:right;font-family:'Courier New',monospace;font-size:14pt;width:30%;">
+            ₹ {{ pyfmt("{:,.2f}", result.data.fairprice | float(0)) }}
+          </td>
+          <td style="padding:8px 12px;border:2px solid #071500;text-align:center;width:10%;">
+            <span style="background:#ffc107;color:#000;padding:3px 8px;border-radius:4px;font-size:9pt;font-weight:bold;-webkit-print-color-adjust:exact;print-color-adjust:exact;">PAYABLE ✓</span>
+          </td>
+        </tr>
+      </table>
+
+      <div style="margin-top:5px;font-size:7.5pt;color:#444;border:1px solid #ccc;padding:4px 8px;background:#fffbe6;line-height:1.9;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
+        <strong>Formula:</strong>
+        Actual/Contractual PVC: (₹{{ pyfmt("{:,.0f}", _br) }} × {{ _qty|int }} + PVC×{{ _qty|int }} + ₹{{ pyfmt("{:,.0f}", _frt) }} frt) × 1.18{% if _ldapply %} − LD{% endif %} &nbsp;|&nbsp;
+        Lower Actual PVC: (₹{{ pyfmt("{:,.0f}", _lr) }} × {{ _qty|int }} + PVC×{{ _qty|int }} + ₹{{ pyfmt("{:,.0f}", _lfrt) }} frt) × 1.18 (no LD) &nbsp;|&nbsp;
+        Lower Contractual PVC: (₹{{ pyfmt("{:,.0f}", _lr) }} × {{ _qty|int }} + PVC×{{ _qty|int }} + ₹{{ pyfmt("{:,.0f}", _lfrt) }} frt) × 1.18
+        <br>
+        <span style="background:#ffc107;padding:1px 5px;border-radius:2px;-webkit-print-color-adjust:exact;print-color-adjust:exact;">Gold ✓</span> = Selected Fair Price &nbsp;|&nbsp;
+        <span style="background:#d4edda;padding:1px 5px;border-radius:2px;-webkit-print-color-adjust:exact;print-color-adjust:exact;">Green ★</span> = Minimum PVC vendor &nbsp;|&nbsp;
+        LD deducted from Actual/Contractual PVC only; Lower Actual PVC compared without LD.
+      </div>
+
+      <div class="pr-footer">
+        Note: This application should be used for cross-verification only. Final PVC as per applicable contract clause shall prevail.
+      </div>
+    </div>{# end PAGE 1 #}
+
+    {# PAGES 2+ — One page per vendor × scenario #}
+    {% for vendor_name in seen_vendors %}
+      {% for sc in igbt_sc_order %}
+        {% if sc in igbt_avail_sc and sc in showsc_print %}
+          {% set vsc_rows = result.igbtvendordetails | selectattr("vendor","equalto",vendor_name) | selectattr("scenario","equalto",sc) | list %}
+          {% if vsc_rows %}
+            {% set vsc  = vsc_rows[0] %}
+            {% set vidx = result.igbtindexdetails | selectattr("vendor","equalto",vendor_name) | selectattr("scenario","equalto",sc) | list %}
+            {% set _a2v = _a2_rows | selectattr("vendor","equalto",vendor_name) | list %}
+            {% set vfirst = _a2v[0] if _a2v else vsc %}
+
+            {% set scall_v = result.igbtvendordetails | selectattr("scenario","equalto",sc) | list %}
+            {% set ns_minv = namespace(val=None, vendor=None) %}
+            {% for r2 in scall_v %}
+              {% set _r2pvc = r2.totalpvc | float(0) %}
+              {% if ns_minv.val == null or _r2pvc < ns_minv.val %}
+                {% set _ = ns_minv.set("val", _r2pvc) %}{% set _ = ns_minv.set("vendor", r2.vendor) %}
+              {% endif %}
+            {% endfor %}
+            {% set is_min_vendor = (vendor_name == ns_minv.vendor) %}
+
+            {% set ld_this = _ldapply and sc in ["A2","B2"] %}
+            {% if ld_this %}
+              {% if sc == "A2" %}{% set ld_v = result.data.ldamtactual | float(0) %}
+              {% else %}{% set ld_v = result.data.ldamtcontractual | float(0) %}{% endif %}
+            {% else %}{% set ld_v = 0 %}{% endif %}
+            {% set _vsc_totalpvc = vsc.totalpvc | float(0) %}
+
+            <div class="print-page">
+              <div class="pr-title"
+                {% if result.data.selectedscenario == sc and is_min_vendor %}
+                  style="background:#ffc107;color:#000;padding:6px 10px;border-bottom:3px solid #856404;-webkit-print-color-adjust:exact;print-color-adjust:exact;"
+                {% elif result.data.selectedscenario == sc %}
+                  style="background:#d4edda;color:#155724;padding:6px 10px;border-bottom:3px solid #155724;-webkit-print-color-adjust:exact;print-color-adjust:exact;"
+                {% elif is_min_vendor %}
+                  style="background:#e8f4fd;color:#1a5276;padding:6px 10px;border-bottom:3px solid #1a5276;-webkit-print-color-adjust:exact;print-color-adjust:exact;"
+                {% endif %}>
+                {{ vendor_name | upper }} — {{ dictGet(sc_names, sc, sc) | upper }}
+                {% if result.data.selectedscenario == sc %}&nbsp;[SELECTED ✓]{% endif %}
+                {% if is_min_vendor %}&nbsp;[MIN PVC VENDOR ★]{% endif %}
+              </div>
+
+              <table class="pr-meta">
+                <tr>
+                  <td class="pr-lbl">Customer:</td><td>Chittaranjan Locomotive Works</td>
+                  <td class="pr-lbl">Product:</td><td>IGBT based 3-Phase Drive Propulsion</td>
+                </tr>
+                {% if result.data.pono or vfirst.pono %}
+                <tr><td class="pr-lbl">CLW PO No.:</td><td colspan="3">{{ vfirst.pono or result.data.pono or "—" }}</td></tr>
+                {% endif %}
+                <tr>
+                  <td class="pr-lbl">Scenario:</td>
+                  <td><strong>{{ dictGet(sc_names, sc, sc) }}</strong> —
+                    {% if sc=="A2" %}Base Rate, Actual (Call) Date
+                    {% elif sc=="B2" %}Base Rate, Scheduled DP
+                    {% elif sc=="C1" %}Lower Rate, Actual (Call) Date
+                    {% elif sc=="D1" %}Lower Rate, Scheduled DP{% endif %}
+                  </td>
+                  <td class="pr-lbl">Currency (ER):</td><td>{{ vsc.currency }}</td>
+                </tr>
+                <tr>
+                  <td class="pr-lbl">Inspection Date:</td><td>{{ data.caldate or "—" }}</td>
+                  <td class="pr-lbl">Base / Current Month:</td><td>{{ vsc.basemonth }} / {{ vsc.currentmonth }}</td>
+                </tr>
+              </table>
+
+              {% if vidx %}
+              <table class="pr-idx" style="margin-top:6px;">
+                <thead>
+                  <tr>
+                    <th style="width:10%">Parameter</th>
+                    <th style="width:23%">Description</th>
+                    <th style="width:11%">Base Month</th>
+                    <th style="width:12%">Base Value</th>
+                    <th style="width:11%">Current Month</th>
+                    <th style="width:12%">Current Value</th>
+                    <th style="width:10%">Ratio</th>
+                    <th style="width:11%">Movement</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for irow in vidx %}
+                  {% if not irow.parameter.startsWith("ER_") or irow.parameter == "ER_" + vsc.currency %}
+                  {% set _ibv = irow.basevalue    | float(0) %}
+                  {% set _icv = irow.currentvalue | float(0) %}
+                  {% set ratio = (_icv / _ibv) if (_ibv != 0 and irow.basevalue != null and irow.currentvalue != null) else none %}
+                  <tr>
+                    <td style="font-weight:bold;text-align:center;">{{ irow.parameter }}</td>
+                    <td>{{ irow.label }}</td>
+                    <td style="text-align:center;color:#555;">{{ irow.actualbasemonth | default(irow.basemonth, true) }}</td>
+                    <td class="pr-num">{{ pyfmt("{:,.4f}", _ibv) }}</td>
+                    <td style="text-align:center;color:#555;">{{ irow.actualcurrentmonth | default(irow.currentmonth, true) }}</td>
+                    <td class="pr-num">
+                      {% if ratio != null %}
+                        <span style="color:{% if ratio > 1 %}#c0392b{% elif ratio < 1 %}#27ae60{% else %}inherit{% endif %};">{{ pyfmt("{:,.4f}", _icv) }}</span>
+                      {% else %}{{ pyfmt("{:,.4f}", _icv) }}{% endif %}
+                    </td>
+                    <td class="pr-num">
+                      {% if ratio != null %}
+                        <span style="color:{% if ratio > 1 %}#c0392b{% elif ratio < 1 %}#27ae60{% else %}inherit{% endif %};">{{ pyfmt("{:.4f}", ratio) }}</span>
+                      {% else %}—{% endif %}
+                    </td>
+                    <td style="text-align:center;font-size:8pt;">
+                      {% if ratio != null %}
+                        {% if ratio > 1 %}<span style="color:#c0392b;">▲ {{ pyfmt("{:.2f}", (ratio-1)*100) }}%</span>
+                        {% elif ratio < 1 %}<span style="color:#27ae60;">▼ {{ pyfmt("{:.2f}", (1-ratio)*100) }}%</span>
+                        {% else %}<span style="color:#666;">No Change</span>{% endif %}
+                      {% else %}—{% endif %}
+                    </td>
+                  </tr>
+                  {% endif %}
+                  {% endfor %}
+                </tbody>
+              </table>
+              {% endif %}
+
+              <table class="pr-table" style="margin-top:6px;">
+                <tr class="pr-highlight">
+                  <td><b>P = Basic Price (P<sub>0</sub>)</b></td>
+                  <td class="pr-num"><b>{{ pyfmt("{:,.2f}", vsc.rate | float(0)) }}</b></td>
+                </tr>
+              </table>
+
+              {% set _vsc_cif        = vsc.cif        | float(0) %}
+              {% set _vsc_rate       = vsc.rate       | float(0) %}
+              {% set _vsc_basicrate  = vsc.basicrate  | float(0) %}
+              {% set _vsc_indigenous = vsc.indigenous | float(0) %}
+              {% set _vsc_p1         = vsc.p1         | float(0) %}
+              {% set _vsc_p2         = vsc.p2         | float(0) %}
+              {% set _vsc_baseduty   = vsc.baseduty   | float(0) %}
+
+              {% if _vsc_cif == 0 %}
+              <div class="pr-sec">PVC FORMULA (No CIF split)</div>
+              <div class="pr-formula-box">
+                <div class="pr-formula-line">P = P<sub>0</sub> × [100 + Fc + Σ(wᵢ × Iᵢ/Iᵢ₀)] / 100</div>
+                {% set p1_rev  = _vsc_indigenous + _vsc_p1 %}
+                {% set factor  = (p1_rev / _vsc_basicrate * 100.0) if _vsc_basicrate != 0 else 0.0 %}
+                <div class="pr-calc-line">
+                  P = {{ pyfmt("{:,.2f}", _vsc_basicrate) }} × <span class="pr-calc-factor">{{ "%.4f"|format(factor) }}</span> / 100
+                  = <b>{{ pyfmt("{:,.2f}", _vsc_basicrate * factor / 100.0) }}</b>
+                </div>
+                <div class="pr-calc-line"><b>Price Variation = {{ pyfmt("{:,.2f}", _vsc_totalpvc) }}</b></div>
+              </div>
+
+              {% else %}
+              <div class="pr-sec">COMMERCIAL VALUES</div>
+              <table class="pr-table">
+                <tr><td>Basic Rate (P<sub>0</sub>) used for PVC components</td><td class="pr-num">{{ pyfmt("{:,.2f}", _vsc_basicrate) }}</td></tr>
+                <tr><td>CIF Content</td><td class="pr-num">{{ pyfmt("{:,.2f}", _vsc_cif) }}</td></tr>
+                <tr><td>Import Duty = CIF × D<sub>0</sub>/100 = {{ pyfmt("{:,.2f}", _vsc_cif) }} × 11/100</td>
+                    <td class="pr-num">{{ pyfmt("{:,.2f}", _vsc_baseduty) }}</td></tr>
+                <tr class="pr-highlight">
+                  <td><b>Indigenous Value = Basic Rate − CIF − Import Duty</b></td>
+                  <td class="pr-num"><b>{{ pyfmt("{:,.2f}", _vsc_indigenous) }}</b></td>
+                </tr>
+              </table>
+
+              <div class="pr-sec">P1 — INDIGENOUS COMPONENT</div>
+              <div class="pr-formula-box">
+                <div class="pr-formula-line">P1 = Iv × [100 + Fc + Σ(wᵢ × Iᵢ/Iᵢ₀)] / 100 − Iv</div>
+                {% set p1_rev = _vsc_indigenous + _vsc_p1 %}
+                {% set factor = (p1_rev / _vsc_indigenous * 100.0) if _vsc_indigenous != 0 else 0.0 %}
+                <div class="pr-calc-line">
+                  P1 = {{ pyfmt("{:,.2f}", _vsc_indigenous) }} × <span class="pr-calc-factor">{{ "%.4f"|format(factor) }}</span> / 100
+                  = <b>{{ pyfmt("{:,.2f}", p1_rev) }}</b>
+                </div>
+                <div class="pr-calc-line"><b>Indigenous Variation (A) = {{ pyfmt("{:,.2f}", _vsc_p1) }}</b></div>
+              </div>
+
+              {% if _vsc_cif > 0 %}
+              {% set er_row = result.igbtindexdetails
+                  | selectattr("vendor","equalto",vendor_name)
+                  | selectattr("scenario","equalto",sc)
+                  | selectattr("parameter","equalto","ER_" + vsc.currency) | list %}
+              {% set d_row = result.igbtindexdetails
+                  | selectattr("vendor","equalto",vendor_name)
+                  | selectattr("scenario","equalto",sc)
+                  | selectattr("parameter","equalto","D") | list %}
+              {% set er_base = er_row[0].basevalue    | float(0) if er_row else 0.0 %}
+              {% set er_curr = er_row[0].currentvalue | float(0) if er_row else 0.0 %}
+              {% set d_base  = d_row[0].basevalue     | float(11) if d_row else 11.0 %}
+              {% set d_curr  = d_row[0].currentvalue  | float(11) if d_row else 11.0 %}
+              {% set er_ratio = (er_curr / er_base) if er_base != 0 else 0.0 %}
+
+              <div class="pr-sec">P2 — IMPORTED CIF COMPONENT</div>
+              <div class="pr-formula-box">
+                <div class="pr-formula-line">P2 = CIF × [ER/ER<sub>0</sub> × (100+D)/100 − (100+D<sub>0</sub>)/100]</div>
+                <div class="pr-calc-line">
+                  P2 = {{ pyfmt("{:,.2f}", _vsc_cif) }}
+                  × ({{ "%.5f"|format(er_ratio) }} × {{ "%.2f"|format(100+d_curr) }}
+                  − {{ "%.2f"|format(100+d_base) }}) / 100
+                  = <b>{{ pyfmt("{:,.2f}", _vsc_p2) }}</b>
+                </div>
+                <div class="pr-calc-line"><b>CIF Variation (B) = {{ pyfmt("{:,.2f}", _vsc_p2) }}</b></div>
+              </div>
+              {% endif %}
+
+              <table class="pr-table" style="margin-top:6px;">
+                <tr class="pr-highlight">
+                  <td><b>Total Price Variation (A + B)</b></td>
+                  <td class="pr-num"><b>{{ pyfmt("{:,.2f}", _vsc_totalpvc) }}</b></td>
+                </tr>
+                <tr class="pr-total">
+                  <td><b>Total Taxable Value (P<sub>0</sub> + Variation)</b></td>
+                  <td class="pr-num"><b>{{ pyfmt("{:,.2f}", _vsc_rate + _vsc_totalpvc) }}</b></td>
+                </tr>
+              </table>
+              {% endif %}
+
+              <div class="pr-sec" style="margin-top:8px;">
+                PVC SUMMARY — {{ vendor_name | upper }}
+              </div>
+              <table class="pr-table">
+                <thead>
+                  <tr style="background:#1a1a1a;color:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
+                    <th style="text-align:left;">PVC Type</th>
+                    <th style="text-align:right;">Basic Price (₹)</th>
+                    <th style="text-align:right;">PVC %</th>
+                    <th style="text-align:right;">PVC Amount (₹)</th>
+                    <th style="text-align:right;">Total Amount (incl PVC) (₹)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for s2 in ["A2","B2","C1","D1"] %}
+                    {% set vr2 = result.igbtvendordetails | selectattr("vendor","equalto",vendor_name) | selectattr("scenario","equalto",s2) | list %}
+                    {% if vr2 %}
+                    <tr>
+                      <td><b>{{ dictGet(sc_names, s2, s2) }}</b></td>
+                      {% set _s2_basic = vr2[0].basicrate | float(0) %}
+                      {% set _s2_pvc   = vr2[0].totalpvc | float(0) %}
+                      {% set _s2_pct   = (_s2_pvc / _s2_basic * 100) if _s2_basic != 0 else 0 %}
+                      {% set _s2_total = _s2_basic + _s2_pvc %}
+                      <td class="pr-num">{{ pyfmt("{:,.2f}", _s2_basic) }}</td>
+                      <td class="pr-num">{{ "%.4f"|format(_s2_pct) }}%</td>
+                      <td class="pr-num">{{ pyfmt("{:,.2f}", _s2_pvc) }}</td>
+                      <td class="pr-num"><b>{{ pyfmt("{:,.2f}", _s2_total) }}</b></td>
+                    </tr>
+                    {% endif %}
+                  {% endfor %}
+                </tbody>
+              </table>
+
+              <div class="pr-footer">
+                Note: This application should be used for cross-verification only. Final PVC as per applicable contract clause shall prevail.
+              </div>
+            </div>
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+    {% endfor %}
+
+  {# ═══════════════════════════════════════════
+     BRANCH B — IEEMA (non-IGBT) print
+  ════════════════════════════════════════════ #}
+  {% else %}
+  <div class="print-page" id="ieemaSummaryPage">
+    <div class="pr-title">PVC CALCULATION SHEET</div>
+
+    <table class="pr-meta">
+      <tr><td class="pr-lbl">Item:</td><td>{{ item }}</td><td class="pr-lbl">Calc ID:</td><td>{{ calcid }}</td></tr>
+      <tr><td class="pr-lbl">User:</td><td>{{ current_user.username }}</td><td class="pr-lbl">Rate Applied:</td><td>{{ data.rateapplied or "—" }}</td></tr>
+      <tr><td class="pr-lbl">PVC Base Date:</td><td>{{ data.pvcbasedate or "—" }}</td><td class="pr-lbl">Call Date:</td><td>{{ data.caldate or "—" }}</td></tr>
+      <tr><td class="pr-lbl">Original DP:</td><td>{{ data.origdp or "—" }}</td><td class="pr-lbl">Supply Date:</td><td>{{ data.supdate or "—" }}</td></tr>
+      <tr><td class="pr-lbl">Refixed DP:</td><td>{{ data.refixeddp or "—" }}</td><td class="pr-lbl">Extended DP w/o LD:</td><td>{{ data.extendeddp or "—" }}</td></tr>
+      <tr>
+        <td class="pr-lbl">Selected Scenario:</td>
+        <td><strong>{{ dictGet(sc_names, result.data.selectedscenario, result.data.selectedscenario) | default("—") }}</strong></td>
+        <td class="pr-lbl">Final Fair Price:</td>
+        <td><strong>₹ {{ pyfmt("{:,.2f}", result.data.fairprice | float(0)) }}</strong></td>
+      </tr>
+      {% if data.developmentaltender %}
+      <tr><td class="pr-lbl">Developmental:</td><td colspan="3"><strong>Yes — No Liquidated Damages.</strong></td></tr>
+      {% endif %}
+    </table>
+
+    <div class="pr-sec">COMMERCIAL INPUTS</div>
+    <table class="pr-table">
+      <tr><td>Basic Rate (₹)</td><td class="pr-num">{{ pyfmt("{:,.2f}", data.basicrate | float(0)) }}</td></tr>
+      <tr><td>Quantity</td><td class="pr-num">{{ (data.quantity | float(0)) | int }}</td></tr>
+      <tr><td>Freight per Unit (₹)</td><td class="pr-num">{{ pyfmt("{:,.2f}", data.freightrateperunit | float(0)) }}</td></tr>
+    </table>
+
+    {% if result.scenariodetails %}
+    <div class="pr-sec ieema-detail-section">INDEX-WISE PVC DETAILS (GENERATED SCENARIOS ONLY)</div>
+    {% for detail in result.scenariodetails %}
+      {% if detail.scenario in showsc_print %}
+      <table class="pr-idx ieema-detail-section" style="margin-bottom:8px;">
+        <thead>
+          <tr>
+            <th colspan="5" style="text-align:left;background:#444;color:#fff;padding:3px 8px;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
+              {{ dictGet(sc_names, detail.scenario, detail.scenario) }}{% if result.data.selectedscenario == detail.scenario %} ★ SELECTED{% endif %}
+              &nbsp;|&nbsp; Base: {{ detail.basemonth }} → Current: {{ detail.currentmonth }}
+              &nbsp;|&nbsp; Total PVC: {{ "%.4f"|format(detail.pvcpercent | float(0)) }}%
+            </th>
+          </tr>
+          <tr>
+            <th style="width:20%">Index</th>
+            <th style="width:20%">Base Value<br><span style="font-weight:normal;font-size:8.5pt;">({{ detail.basemonth }})</span></th>
+            <th style="width:20%">Current Value<br><span style="font-weight:normal;font-size:8.5pt;">({{ detail.currentmonth }})</span></th>
+            <th style="width:20%">Weight (%)</th>
+            <th style="width:20%">Contribution (%)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for k in keys(detail) %}
+            {% if k.endsWith("_base") %}
+              {% set ik = k.slice(0, -5) %}
+              {% set b = detail[ik + "_base"] %}
+              {% set c = detail[ik + "_current"] %}
+              {% set w = detail[ik + "_weight"] %}
+              {% set con = detail[ik + "_contributionpct"] %}
+              {% set bm = dictGet(detail, ik + "_actualbasemonth") or dictGet(detail, ik + "_basemonth") %}
+              {% set cm = dictGet(detail, ik + "_actualcurrentmonth") or dictGet(detail, ik + "_currentmonth") %}
+              <tr>
+                <td style="font-weight:bold;text-align:center;">{{ (ik | upper) }}</td>
+                <td class="pr-num">
+                  {% if b != null %}{{ "%.4f"|format(b | float(0)) }}{% else %}—{% endif %}
+                  {% if bm %}<br><span style="font-family:sans-serif;font-size:7.5pt;color:#666;font-weight:normal;">{{ bm }}</span>{% endif %}
+                </td>
+                <td class="pr-num">
+                  {% if c != null %}{{ "%.4f"|format(c | float(0)) }}{% else %}—{% endif %}
+                  {% if cm %}<br><span style="font-family:sans-serif;font-size:7.5pt;color:#666;font-weight:normal;">{{ cm }}</span>{% endif %}
+                </td>
+                <td style="text-align:center;">{% if w != null %}{{ w }}{% else %}—{% endif %}</td>
+                <td class="pr-num" style="font-weight:bold;">
+                  {% if con != null %}
+                    {% set con_f = con | float(0) %}
+                    <span style="color:{% if con_f > 0 %}#27ae60{% elif con_f < 0 %}#c0392b{% else %}inherit{% endif %};">{{ "%.4f"|format(con_f) }}</span>
+                  {% else %}—{% endif %}
+                </td>
+              </tr>
+            {% endif %}
+          {% endfor %}
+          <tr style="background:#eee;font-weight:bold;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
+            <td colspan="4" style="text-align:right;">Total PVC %</td>
+            <td class="pr-num" style="color:{% if detail.pvcpercent|float(0) > 0 %}#27ae60{% elif detail.pvcpercent|float(0) < 0 %}#c0392b{% else %}inherit{% endif %};">{{ "%.4f"|format(detail.pvcpercent | float(0)) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      {% endif %}
+    {% endfor %}
+
+    {% endif %}
+
+    <div class="pr-sec">SCENARIO COMPARISON — NET PVC PAYABLE AFTER LD</div>
+
+    {% set _na2 = (result.data.pvcactuallessldnew      | float(0)) if result.data.pvcactuallessldnew      != null else (result.data.pvcactual      | float(0)) %}
+    {% set _nb2 = (result.data.pvccontractuallessldnew | float(0)) if result.data.pvccontractuallessldnew != null else (result.data.pvccontractual | float(0)) %}
+    {% set _nc1 = (result.data.loweractuallessld       | float(0)) if result.data.loweractuallessld       != null else (result.data.loweractual    | float(0)) %}
+    {% set _nd1 = (result.data.lowercontractuallessld  | float(0)) if result.data.lowercontractuallessld  != null else (result.data.lowercontractual| float(0)) %}
+
+    {% set ns_ieema = namespace(minnet=None, minsc=None) %}
+    {% if "A2" in showsc_print %}{% if ns_ieema.minnet == null or _na2 < ns_ieema.minnet %}{% set _ = ns_ieema.set("minnet", _na2) %}{% set _ = ns_ieema.set("minsc", "A2") %}{% endif %}{% endif %}
+    {% if "B2" in showsc_print %}{% if ns_ieema.minnet == null or _nb2 < ns_ieema.minnet %}{% set _ = ns_ieema.set("minnet", _nb2) %}{% set _ = ns_ieema.set("minsc", "B2") %}{% endif %}{% endif %}
+    {% if "C1" in showsc_print and "C1" in result.scenarioamounts %}{% if ns_ieema.minnet == null or _nc1 < ns_ieema.minnet %}{% set _ = ns_ieema.set("minnet", _nc1) %}{% set _ = ns_ieema.set("minsc", "C1") %}{% endif %}{% endif %}
+    {% if "D1" in showsc_print and "D1" in result.scenarioamounts %}{% if ns_ieema.minnet == null or _nd1 < ns_ieema.minnet %}{% set _ = ns_ieema.set("minnet", _nd1) %}{% set _ = ns_ieema.set("minsc", "D1") %}{% endif %}{% endif %}
+
+    <table class="pr-table">
+      <thead>
+        <tr style="background:#1a1a1a;color:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
+          <th style="padding:4px 8px;text-align:left;">PVC Type</th>
+          <th style="padding:4px 8px;text-align:right;">Gross PVC (₹)</th>
+          <th style="padding:4px 8px;text-align:right;">LD (₹)</th>
+          <th style="padding:4px 8px;text-align:right;">Net Payable (₹)</th>
+          <th style="padding:4px 8px;text-align:right;">PVC per Set (₹)</th>
+          <th style="padding:4px 8px;text-align:center;">Remark</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% set pr_rows = [
+          ["A2","Base Rate, Actual Date",       result.data.pvcactual,       result.data.ldamtactual,      _na2, result.data.selectedscenario=="A2", ns_ieema.minsc=="A2", result.data.pvcperseta2],
+          ["B2","Base Rate, Scheduled DP",      result.data.pvccontractual,  result.data.ldamtcontractual, _nb2, result.data.selectedscenario=="B2", ns_ieema.minsc=="B2", result.data.pvcpersetb2],
+          ["C1","Lower Rate, Actual Date",      result.data.loweractual,     0,                            _nc1, result.data.selectedscenario=="C1", ns_ieema.minsc=="C1", result.data.pvcpersetc1],
+          ["D1","Lower Rate, Scheduled DP",     result.data.lowercontractual,0,                            _nd1, result.data.selectedscenario=="D1", ns_ieema.minsc=="D1", result.data.pvcpersetd1]
+        ] %}
+        {% for row_sc,row_desc,row_gross,row_ld,row_net,row_sel,row_min,row_perset in pr_rows %}
+          {% if row_sc in showsc_print and (row_sc in ["A2","B2"] or row_sc in result.scenarioamounts) %}
+          <tr {% if row_sel and row_min %}style="background:#ffc107;font-weight:bold;-webkit-print-color-adjust:exact;print-color-adjust:exact;"
+              {% elif row_sel %}class="pr-total"
+              {% elif row_min %}style="background:#d4edda;-webkit-print-color-adjust:exact;print-color-adjust:exact;"{% endif %}>
+            <td>
+                <b>{{ dictGet(sc_names, row_sc, row_sc) }}</b><br><span style="font-size:8pt;color:#555;">{{ row_desc }}</span>
+            </td>
+            <td class="pr-num">₹ {{ pyfmt("{:,.2f}", row_gross | float(0)) }}</td>
+            <td class="pr-num" style="{% if _ldapply and row_sc in ['A2','B2'] and row_ld %}color:#c0392b;{% endif %}">
+              {% if _ldapply and row_sc in ["A2","B2"] and row_ld %}− ₹ {{ pyfmt("{:,.2f}", row_ld | float(0)) }}{% else %}—{% endif %}
+            </td>
+            <td class="pr-num"><b>₹ {{ pyfmt("{:,.2f}", row_net | float(0)) }}</b></td>
+            <td class="pr-num">{% if row_perset != null %}₹ {{ pyfmt("{:,.2f}", row_perset | float(0)) }}{% else %}—{% endif %}</td>
+            <td style="text-align:center;font-size:8.5pt;">
+              {% if row_sel %}<span style="background:#155724;color:#fff;padding:1px 5px;border-radius:3px;-webkit-print-color-adjust:exact;print-color-adjust:exact;">SELECTED ✓</span>{% endif %}
+              {% if row_min %}<span style="background:#856404;color:#fff;padding:1px 5px;border-radius:3px;margin-left:2px;-webkit-print-color-adjust:exact;print-color-adjust:exact;">{{ dictGet(sc_names, row_sc, row_sc) | upper }} MIN ★</span>{% endif %}
+            </td>
+          </tr>
+          {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% if _ldapply %}
+    <div class="pr-sec">LIQUIDATED DAMAGES</div>
+    <table class="pr-table">
+      <tr>
+        <td>Delay Days</td><td class="pr-num">{{ _lddays | int }}</td>
+        <td>Delay Weeks (ceiling)</td><td class="pr-num">{{ _ldweeks | int }}</td>
+      </tr>
+      <tr>
+        <td>LD Rate (weeks × 0.5%, max 10%)</td><td class="pr-num">{{ "%.2f"|format(_ldpct) }}%</td>
+        <td>LD on Actual PVC</td><td class="pr-num"><b>₹ {{ pyfmt("{:,.2f}", result.data.ldamtactual | float(0)) }}</b></td>
+      </tr>
+      <tr>
+        <td>LD on Contractual PVC</td><td class="pr-num"><b>₹ {{ pyfmt("{:,.2f}", result.data.ldamtcontractual | float(0)) }}</b></td>
+        <td colspan="2"></td>
+      </tr>
+    </table>
+    {% endif %}
+
+    <table class="pr-table" style="margin-top:8px;">
+      <tr class="pr-total">
+        <td><b>Final Payable Fair Price</b>
+          <span style="font-size:8.5pt;font-weight:normal;">
+            ({{ dictGet(sc_names, result.data.selectedscenario, result.data.selectedscenario) | default("—") }} — lowest net payable)
+          </span>
+        </td>
+        <td class="pr-num"><b>₹ {{ pyfmt("{:,.2f}", result.data.fairprice | float(0)) }}</b></td>
+      </tr>
+    </table>
+
+    <div style="margin-top:8px;font-size:8.5pt;color:#555;border:1px solid #ccc;padding:5px 8px;background:#fffbe6;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
+      <b>Legend:</b>
+      &nbsp;<span style="background:#ffc107;padding:1px 6px;-webkit-print-color-adjust:exact;print-color-adjust:exact;">Gold</span> = Selected &amp; Minimum
+      &nbsp;|&nbsp;<span style="background:#d4edda;padding:1px 6px;-webkit-print-color-adjust:exact;print-color-adjust:exact;">Green</span> = Minimum net payable
+      &nbsp;|&nbsp; LD deducted from Actual/Contractual PVC only; Lower Actual PVC shown as-is.
+    </div>
+
+    <div class="pr-footer">
+      Note: This application should be used for cross-verification only. Final PVC as per applicable contract clause shall prevail.
+    </div>
+  </div>
+  {% endif %}{# end IGBT/IEEMA branch #}
+
+  </div>{# end #printReport #}
+
+</div>{# end .container #}
+
+<!-- ─── STYLES ────────────────────── -->
+<style>
+@page { size:A4 portrait; margin:8mm 10mm 8mm 10mm; }
+
+#printReport,
+.print-page { display:none; }
+
+.print-raw-show { display: none !important; }
+@media print { body.print-raw .print-raw-show { display: block !important; } }
+
+@media print {
+  body > nav, body > footer, .no-print { display:none !important; }
+  body:not(.print-raw) .container > *:not(#printReport)     { display:none !important; }
+  body:not(.print-raw) #printReport  { display:block !important; width:100% !important; }
+  body:not(.print-raw) .print-page   { display:block !important; width:100% !important; box-sizing:border-box; }
+
+  /* Hide irrelevant cards when using the new "Print" format */
+  body.print-raw .hide-in-print-raw { display: none !important; }
+
+  /* Full width for 'Print As It Is' to accommodate row content */
+  body.print-raw .container { max-width: 100% !important; width: 100% !important; padding: 0 !important; }
+  body.print-raw .table-responsive { overflow: visible !important; }
+
+  /* Force all tab contents to display sequentially in Print As It Is mode */
+  body.print-raw .tab-content > .tab-pane { display: block !important; opacity: 1 !important; visibility: visible !important; margin-bottom: 1rem; }
+
+  /* Start the detailed sections on a fresh page so the header isn't orphaned */
+  body.print-raw #igbtVendorCard, body.print-raw #ieemaIndexCard { page-break-before: always; }
+  body.print-raw #igbtVendorCard > .card-header, body.print-raw #ieemaIndexCard > .card-header { page-break-after: avoid; }
+
+  /* Put each scenario on a new page but allow breaking inside if too long */
+  body.print-raw #idxTabContent > .tab-pane,
+  body.print-raw #igbtTabContent > .tab-pane { page-break-after: always; }
+  body.print-raw #idxTabContent > .tab-pane:last-child,
+  body.print-raw #igbtTabContent > .tab-pane:last-child { page-break-after: auto; }
+
+  /* Avoid breaking an individual vendor's indices block across pages */
+  body.print-raw [id^="vpillContent-"] > .tab-pane { page-break-inside: avoid; }
+
+  /* Compact tables and headings to fit multiple vendor indices on one page */
+  body.print-raw .table { font-size: 0.7rem; margin-bottom: 0.5rem; }
+  body.print-raw .table th, body.print-raw .table td { padding: 0.15rem 0.3rem; }
+  body.print-raw h5, body.print-raw h6 { margin-top: 0.5rem !important; margin-bottom: 0.25rem !important; }
+  body.print-raw .nav-tabs, body.print-raw .nav-pills { display: none !important; }
+}
+
+.print-page {
+  font-family:'Times New Roman',Times,serif;
+  font-size:9pt;
+  line-height:1.25;
+  width:100%;
+  box-sizing:border-box;
+  page-break-after:always;
+}
+.print-page:last-child { page-break-after:avoid; }
+
+.pr-title {
+  text-align:center;font-size:11pt;font-weight:bold;
+  border-bottom:2px solid #000;padding-bottom:3px;margin-bottom:5px;letter-spacing:.3px;
+}
+.pr-meta { width:100%;font-size:8.5pt;margin-bottom:5px;border-collapse:collapse;table-layout:fixed; }
+.pr-meta td { padding:1px 4px;vertical-align:top;word-break:break-word; }
+.pr-lbl { font-weight:bold;white-space:nowrap;width:26%; }
+
+.pr-sec {
+  background:#1a1a1a;color:#fff;font-weight:bold;font-size:8.5pt;
+  padding:2px 5px;margin:5px 0 2px;
+  -webkit-print-color-adjust:exact;print-color-adjust:exact;
+}
+
+.pr-table { width:100%;border-collapse:collapse;font-size:8.5pt;margin-bottom:3px;table-layout:fixed;word-break:break-word; }
+.pr-table td, .pr-table th { border:1px solid #bbb;padding:1px 4px; }
+.pr-table .pr-num { text-align:right;font-family:'Courier New',monospace; }
+.pr-table tr.pr-highlight td { background:#fff3cd;font-weight:bold;-webkit-print-color-adjust:exact;print-color-adjust:exact; }
+.pr-table tr.pr-total td { background:#d4edda;font-weight:bold;font-size:9.5pt;-webkit-print-color-adjust:exact;print-color-adjust:exact; }
+
+.pr-idx { width:100%;border-collapse:collapse;font-size:8.5pt;margin-bottom:3px;table-layout:fixed; }
+.pr-idx th { background:#d5d5d5;border:1px solid #888;padding:1px 4px;text-align:center;-webkit-print-color-adjust:exact;print-color-adjust:exact; }
+.pr-idx td { border:1px solid #aaa;padding:1px 4px;word-break:break-word; }
+.pr-idx td.pr-num { text-align:right;font-family:'Courier New',monospace; }
+
+.pr-idx-header { width:100%;border-collapse:collapse;font-size:8.5pt;table-layout:fixed; }
+.pr-idx-header th { background:#e8e8e8;border:1px solid #aaa;padding:1px 4px;font-weight:bold;text-align:center;-webkit-print-color-adjust:exact;print-color-adjust:exact; }
+
+.pr-idx-twoCol { width:100%;border-collapse:collapse;font-size:9pt;margin-bottom:3px;table-layout:fixed; }
+.pr-idx-twoCol td { padding:1px 4px;border:1px solid #ccc;word-break:break-word; }
+.pr-idx-param  { font-weight:bold;width:12%; }
+.pr-idx-param0 { font-weight:bold;width:12%;border-left:2px solid #888; }
+.pr-idx-val    { text-align:right;font-family:'Courier New',monospace;width:26%; }
+
+.pr-formula-box { border:1px solid #ccc;background:#fafafa;padding:4px 8px;margin:2px 0 3px;font-size:8.5pt;line-height:1.5;-webkit-print-color-adjust:exact;print-color-adjust:exact;word-break:break-word; }
+.pr-formula-line { margin-bottom:2px; }
+.pr-calc-line   { margin-top:2px;font-size:8.5pt; }
+.pr-calc-factor { font-weight:bold; }
+
+.pr-footer { margin-top:10px;font-size:7.5pt;color:#444;border-top:1px solid #bbb;padding-top:3px; }
+
+#printWrapper .print-page { display:block !important; }
+</style>
+
+<!-- ─── PRINT SCRIPT ──────────────── -->
+<script>
+function openPrintReport(summaryOnly = false) {
+  var pr = document.getElementById('printReport');
+  if (!pr) { alert('Print section not found.'); return; }
+
+  var overlay = document.createElement('div');
+  overlay.id = 'printWrapper';
+      overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:#525659;z-index:99999;overflow:auto;padding-top:60px;';
+
+      // Fixed Control Bar at the top
+      var ctrlBar = document.createElement('div');
+      ctrlBar.className = 'no-print';
+      ctrlBar.style.cssText = 'position:fixed;top:0;left:0;width:100%;background:#f8f9fa;border-bottom:1px solid #dee2e6;padding:10px 20px;z-index:100000;box-shadow:0 2px 4px rgba(0,0,0,0.1);display:flex;justify-content:space-between;align-items:center;';
+      
+      var titleText = summaryOnly ? 'Print Preview - Summary Only' : 'Print Preview';
+      ctrlBar.innerHTML = '<h5 class="mb-0 text-dark"><i class="bi bi-file-earmark-text me-2"></i>' + titleText + '</h5>' +
+                          '<div><button onclick="window.print()" class="btn btn-primary me-2"><i class="bi bi-printer me-1"></i> Print Document</button>' +
+                          '<button onclick="closePrintReport()" class="btn btn-secondary"><i class="bi bi-arrow-left me-1"></i> Back</button></div>';
+      overlay.appendChild(ctrlBar);
+
+      // A4 Page container
+      var contentWrapper = document.createElement('div');
+      contentWrapper.style.cssText = 'max-width:210mm;margin:0 auto;background:#fff;box-shadow:0 0 10px rgba(0,0,0,0.5);';
+      contentWrapper.innerHTML = pr.innerHTML;
+      overlay.appendChild(contentWrapper);
+
+  document.body.appendChild(overlay);
+
+  var pages = overlay.querySelectorAll('.print-page');
+  pages.forEach(function(p) {
+    if (summaryOnly && p.id !== 'summarySheetPage' && p.id !== 'ieemaSummaryPage') {
+      p.remove(); // Completely remove non-summary pages from the print DOM
+    } else {
+      p.style.display    = 'block';
+      p.style.width      = '100%';
+      p.style.boxSizing  = 'border-box';
+      p.style.borderBottom = '1px dashed #ccc'; // Visual separator between pages
+      
+      if (summaryOnly && p.id === 'ieemaSummaryPage') {
+        p.querySelectorAll('.ieema-detail-section').forEach(function(el) {
+          el.remove(); // Completely remove index calculation details from summary
+        });
+      }
+    }
+  });
+
+  var ps = document.createElement('style');
+  ps.id = 'printOverrideStyle';
+  ps.textContent =
+    '@media print{' +
+    'body>*:not(#printWrapper){display:none!important;}' +
+        '#printWrapper{position:static!important;overflow:visible!important;padding-top:0!important;background:none!important;}' +
+        '#printWrapper > div:last-child{max-width:100%!important;box-shadow:none!important;margin:0!important;}' +
+        '#printWrapper .no-print{display:none!important;}' +
+        '#printWrapper .no-print-page{display:none!important;}' +
+        '#printWrapper .print-page:not(.no-print-page){display:block!important;width:100%!important;box-sizing:border-box!important;border-bottom:none!important;}' +
+    '}';
+  document.head.appendChild(ps);
+}
+
+    function closePrintReport() {
+      var overlay = document.getElementById('printWrapper');
+      if (overlay && document.body.contains(overlay)) document.body.removeChild(overlay);
+      var s = document.getElementById('printOverrideStyle');
+      if (s) document.head.removeChild(s);
+
+      {% if auto_summary %}
+      window.history.back();
+      {% endif %}
+}
+
+function printAsItIs() {
+  var s = document.createElement('style');
+  s.id = 'printRawStyle';  
+  s.textContent = '@page { size: portrait; }';
+  document.body.appendChild(s);
+
+  document.body.classList.add('print-raw');
+  window.print();
+  setTimeout(function() {
+    document.body.classList.remove('print-raw');
+    if (s) document.body.removeChild(s);
+  }, 1000);
+}
+</script>
+
+{% if auto_summary %}
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+  openPrintReport(true);
+});
+</script>
+{% endif %}
+{% endblock %}

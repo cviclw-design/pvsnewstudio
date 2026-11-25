@@ -1,0 +1,735 @@
+{% extends "base.html" %}
+{% block title %}PVC Calculator{% endblock %}
+
+{% block content %}
+<div class="alert alert-primary mt-2 d-flex justify-content-between align-items-center">
+  <div>
+    <h4 class="mb-1"><i class="bi bi-calculator me-2"></i>PVC Calculation</h4>
+    <div class="small">Fill the details below</div>
+  </div>
+  <div>
+    <button type="button" class="btn btn-outline-secondary btn-sm fw-bold me-2" onclick="window.history.back()"><i class="bi bi-arrow-left"></i> Back</button>
+    <a href="{{ url_for('main.index') }}" class="btn btn-outline-primary btn-sm fw-bold"><i class="bi bi-grid-fill me-1"></i> Dashboard</a>
+  </div>
+</div>
+
+<style>
+  /* Distinct Page and Card Backgrounds to make White Textboxes pop */
+  body {
+    background-color: #e2e8f0 !important;
+  }
+  .card {
+    background-color: #f1f5f9 !important;
+    border: 1px solid #cbd5e1;
+  }
+  .form-control, .form-select {
+    background-color: #ffffff !important;
+    border: 1px solid #adb5bd;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);
+  }
+
+  /* Highly visible, interactive checkboxes */
+  .form-check-input {
+    width: 1.6em;
+    height: 1.6em;
+    margin-top: 0.1em;
+    border: 2px solid #8e959b;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+  }
+  .form-check-input:checked {
+    background-color: #fd7e14; /* Vibrant Orange */
+    border-color: #fd7e14;
+    transform: scale(1.1);
+  }
+  .form-check-input:focus {
+    box-shadow: 0 0 0 0.25rem rgba(253, 126, 20, 0.25);
+  }
+  .form-check-label {
+    cursor: pointer;
+    padding-top: 0.2em;
+    padding-left: 0.3em;
+  }
+  .form-check {
+    padding: 0.4rem 0.8rem 0.4rem 2.2rem;
+    border-radius: 8px;
+    background-color: #f8f9fa;
+    border: 1px solid #e9ecef;
+    transition: all 0.2s ease;
+    margin-bottom: 0.5rem;
+  }
+  .form-check:hover {
+    background-color: #e9ecef;
+    border-color: #ced4da;
+  }
+</style>
+
+<form method="post" action="{{ url_for('pvc.calculate') }}">
+
+  <!-- Basic details -->
+  <div class="card mb-3 shadow-sm">
+    <div class="card-header py-3" style="background-color: #e2e8f0;">
+      <h6 class="mb-0 text-primary fw-bold">Basic Details</h6>
+    </div>
+    <div class="card-body">
+      <div class="row g-3">
+
+        <!-- Item -->
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Item</label>
+          <select class="form-select form-select-sm" name="itemid" id="itemid" required>
+            <option value="">-- Select Item --</option>
+            {% for it in items %}
+            <option
+              value="{{ it.id }}"
+              data-formula="{{ it.pvc_formula_code or '' }}"
+              data-extra="{{ it.extra_fields_json or '' }}"
+            >
+              {{ it.name }}{% if it.code %} ({{ it.code }}){% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- Tender (for IGBT items) -->
+        <div class="col-md-3" id="tendersection" style="display:none;">
+          <label class="form-label fw-semibold">Select Tender</label>
+          <select class="form-select form-select-sm" name="tenderid" id="tenderid">
+            <option value="">-- Select Tender --</option>
+            {% for t in tenders %}
+            <option
+              value="{{ t.id }}"
+              data-itemid="{{ t.item_id }}"
+              data-basicrate="{{ t.basicrate|round(2) if t.basicrate else '' }}"
+              data-pvcbasedate="{{ t.pvcbasedate or '' }}"
+            >
+              {{ t.tender_no }} – {{ t.item.name if t.item else '' }}
+            </option>
+            {% endfor %}
+          </select>
+          <small class="text-muted">
+            For <code>IGBTPROPULSIONSYSTEM</code>.
+          </small>
+        </div>
+
+        <!-- Vendor (for IGBT items) -->
+        <div class="col-md-3" id="vendorsection" style="display:none;">
+          <label class="form-label fw-semibold">Select Vendor</label>
+          <select class="form-select form-select-sm" name="vendorid" id="vendorid">
+            <option value="">-- Select Vendor --</option>
+            {% for t in tenders %}
+              {% for v in t.vendors %}
+              <option
+                value="{{ v.id }}"
+                data-tenderid="{{ t.id }}"
+                data-freightrateperunit="{{ v.freightrateperunit|round(2) if v.freightrateperunit else '' }}"
+              >
+                {{ v.vendor_name }}
+              </option>
+              {% endfor %}
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- Basic rate / qty / freight -->
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Basic Rate (per unit)</label>
+          <input class="form-control form-control-sm" type="number" step="any" name="basicrate" id="basicrate" required>
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Quantity Accepted</label>
+          <input class="form-control form-control-sm" type="number" step="1" name="quantity" value="1" min="1" required>
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Freight (per unit)</label>
+          <input class="form-control form-control-sm" type="number" step="any" name="freightrateperunit" id="freightrateperunit" value="0">
+        </div>
+
+        <!-- Rate Applied -->
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Rate Applied</label>
+          <select class="form-select form-select-sm" name="rateapplied" id="rateapplied" required>
+            <option value="">-- Select --</option>
+            <option value="Supply Within Original DP or Refixed DP">Supply Within Original DP or Refixed DP</option>
+            <option value="Supply Beyond Original DP or Refixed DP">Supply Beyond Original DP or Refixed DP</option>
+            <option value="Lower Rate Applicable Within DP">Lower Rate Applicable Within DP</option>
+            <option value="Lower Rate Applicable Beyond DP Without LD">Lower Rate Applicable Beyond DP Without LD</option>
+            <option value="Lower Rate Applicable Beyond DP With LD">Lower Rate Applicable Beyond DP With LD</option>
+            <option value="Lower Rate Applicable in Further DP Extension With LD">Lower Rate Applicable in Further DP Extension With LD</option>
+          </select>
+          <!-- Auto-detect badge -->
+          <div id="ratedetectbadge" class="mt-1" style="display:none;">
+            <span class="badge bg-info text-dark">Auto-detected: <span id="ratedetectlabel"></span></span>
+          </div>
+        </div>
+
+      </div><!-- /.row -->
+
+      <!-- Lower rate applicable checkboxes -->
+      <div class="mt-3 pt-2 border-top">
+        <div class="row g-2 align-items-center">
+          <div class="col-md-4">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="lowerrateapplicablechk" name="lowerrateapplicable" value="1">
+              <label class="form-check-label fw-semibold" for="lowerrateapplicablechk">Lower Rate Applicable</label>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="developmentaltender" name="developmentaltender" value="1">
+              <label class="form-check-label fw-semibold" for="developmentaltender">Developmental Tender</label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Lower rate data entry fields (hidden until checkbox ticked) -->
+      <div id="lowerratesection" class="mt-3 pt-3 border-top" style="display:none;">
+        <div class="row g-3" id="manual_lower_rate_fields">
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">Lower Basic Rate (per unit)</label>
+            <input class="form-control form-control-sm" type="number" step="any" name="lowerrate" id="lowerrate">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">Lower Freight (per unit)</label>
+            <input class="form-control form-control-sm" type="number" step="any" name="lowerfreight" id="lowerfreight">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">Lower Base Date</label>
+            <input class="form-control form-control-sm" type="date" name="lowerbasicdate" id="lowerbasicdate">
+          </div>
+        </div>
+        
+        <div class="row g-3 mt-1" id="subsequent_tender_fields" style="display:none;">
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">Subsequent Tender</label>
+            <select class="form-select form-select-sm" name="subsequent_tenderid" id="subsequent_tenderid">
+              <option value="">-- Select Subsequent Tender --</option>
+              {% for t in tenders %}
+              <option
+                value="{{ t.id }}"
+                data-itemid="{{ t.item_id }}"
+              >
+                {{ t.tender_no }} – {{ t.item.name if t.item else '' }}
+              </option>
+              {% endfor %}
+            </select>
+            <small class="text-muted">Select the subsequent tender to automatically apply its Base Rate, Base Date, Freight, and CIF for Lower Rate scenarios.</small>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /.card-body (Basic Details) -->
+  </div><!-- /.card (Basic Details) -->
+
+  <!-- Item-specific extra fields -->
+  <div class="card mb-3 shadow-sm" id="itemextrasection" style="display:none;">
+    <div class="card-header py-3" style="background-color: #e2e8f0;">
+      <h6 class="mb-0 text-primary fw-bold">Item-Specific Inputs</h6>
+    </div>
+    <div class="card-body" id="itemextracontainer"></div>
+  </div>
+
+  <!-- Date details -->
+  <div class="card mb-3 shadow-sm">
+    <div class="card-header py-3" style="background-color: #e2e8f0;">
+      <h6 class="mb-0 text-primary fw-bold">Date Details</h6>
+    </div>
+    <div class="card-body">
+      <div class="row g-3">
+
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">PVC Base Date</label>
+          <input class="form-control form-control-sm" type="date" name="pvcbasedate" id="pvcbasedate">
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">Original DP</label>
+          <input class="form-control form-control-sm" type="date" name="origdp">
+        </div>
+
+        <div class="col-md-4 mb-3">
+          <div class="form-check mb-1">
+            <input class="form-check-input" type="checkbox" id="refixeddpchk">
+            <label class="form-check-label" for="refixeddpchk">Refixed DP Applicable</label>
+          </div>
+          <input class="form-control form-control-sm" type="date" name="refixeddp" id="refixeddpinput" disabled>
+        </div>
+
+        <div class="col-md-4 mb-3">
+          <div class="form-check mb-1">
+            <input class="form-check-input" type="checkbox" id="extendeddpchk">
+            <label class="form-check-label" for="extendeddpchk">Extended DP Without LD</label>
+          </div>
+          <input class="form-control form-control-sm" type="date" name="extendeddp" id="extendeddpinput" disabled>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">Call / Inspection Date</label>
+          <input class="form-control form-control-sm" type="date" name="caldate">
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">Supply Date</label>
+          <input class="form-control form-control-sm" type="date" name="supdate">
+        </div>
+
+      </div>
+    </div><!-- /.card-body (Date Details) -->
+  </div><!-- /.card (Date Details) -->
+
+  <!-- Submit -->
+  <div class="text-center mb-4">
+    <button type="button" class="btn btn-secondary px-4 me-2" onclick="window.history.back()">
+      <i class="bi bi-arrow-left"></i> Back
+    </button>
+    <button type="submit" name="action" value="calculate" class="btn btn-primary px-4 me-2">
+      <i class="bi bi-calculator"></i> Calculate PVC
+    </button>
+    <button type="submit" name="action" value="summary" class="btn btn-warning px-4 text-dark">
+      <i class="bi bi-file-earmark-text"></i> Print Summary
+    </button>
+    <a href="{{ url_for('pvc.bulk_calculator') }}" class="btn btn-success px-4">
+      <i class="bi bi-upload"></i> Bulk PVC Calculator
+    </a>
+  </div>
+
+</form>
+{% endblock %}
+
+{% block extrajs %}
+<script>
+"use strict";
+
+// ════════════════════════════════════════════════════════════════[...]
+// CONSTANTS
+// ════════════════════════════════════════════════════════════════[...]
+
+const lowerModes = [
+  "lower rate applicable",
+  "lower rate and ld comparison",
+  "lower rate with ld in further extension",
+  "lower rate applicable beyond dp without ld",
+  "lower rate applicable beyond dp with ld",
+  "lower rate applicable in further dp extension with ld"
+];
+
+const rateLabels = {
+  "supply before due date"                  : "Supply Within Original DP / Refixed DP",
+  "supply after due date"                   : "Supply Beyond Original DP / Refixed DP",
+  "lower rate applicable"                   : "Lower Rate Applicable Beyond DP Without LD",
+  "lower rate and ld comparison"            : "Lower Rate Applicable Beyond DP With LD",
+  "lower rate with ld in further extension" : "Lower Rate Applicable in Further DP Extension With LD",
+  "Supply Within Original DP or Refixed DP" : "Supply Within Original DP or Refixed DP",
+  "Supply Beyond Original DP or Refixed DP" : "Supply Beyond Original DP or Refixed DP",
+  "Lower Rate Applicable Within DP"         : "Lower Rate Applicable Within DP",
+  "Lower Rate Applicable Beyond DP Without LD": "Lower Rate Applicable Beyond DP Without LD",
+  "Lower Rate Applicable Beyond DP With LD" : "Lower Rate Applicable Beyond DP With LD",
+  "Lower Rate Applicable in Further DP Extension With LD": "Lower Rate Applicable in Further DP Extension With LD"
+};
+
+// ════════════════════════════════════════════════════════════════[...]
+// DATE HELPERS
+// ════════════════════════════════════════════════════════════════[...]
+
+function parseDateByName(fieldName) {
+  const el = document.getElementsByName(fieldName)[0];
+  if (!el) return null;
+  const v = (el.value || "").trim();
+  if (!v) return null;
+  const d = new Date(v + "T00:00:00");
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function parseDateById(fieldId) {
+  const el = document.getElementById(fieldId);
+  if (!el) return null;
+  const v = (el.value || "").trim();
+  if (!v) return null;
+  const d = new Date(v + "T00:00:00");
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// Returns latest of Original DP / Refixed DP.
+// Refixed is only counted when its checkbox is ticked.
+// Extended DP is NOT used to extend the basic PVC due date for rate applied logic.
+function getLatestDPDate() {
+  const orig   = parseDateByName("origdp");
+  const rfxInp = document.getElementById("refixeddpinput");
+
+  const refixed  = (rfxInp && !rfxInp.disabled) ? parseDateByName("refixeddp")  : null;
+
+  let latest = orig;
+  if (refixed && (!latest || refixed > latest)) latest = refixed;
+  return latest;
+}
+
+// ════════════════════════════════════════════════════════════════[...]
+// STATE HELPERS
+// ════════════════════════════════════════════════════════════════[...]
+
+function isIGBTSelected() {
+  const itemSel = document.getElementById("itemid");
+  if (!itemSel) return false;
+  const opt = itemSel.options[itemSel.selectedIndex];
+  if (!opt || !opt.value) return false;
+  return (opt.getAttribute("data-formula") || "").trim().toUpperCase() === "IGBTPROPULSIONSYSTEM";
+}
+
+function isLowerRateApplicable() {
+  const chk = document.getElementById("lowerrateapplicablechk");
+  return chk ? chk.checked : false;
+}
+
+function isDevelopmental() {
+  const chk = document.getElementById("developmentaltender");
+  return chk ? chk.checked : false;
+}
+
+// ════════════════════════════════════════════════════════════════[...]
+// UI TOGGLE FUNCTIONS
+// ════════════════════════════════════════════════════════════════[...]
+
+function toggleLowerRate() {
+  const sec = document.getElementById("lowerratesection");
+  if (!sec) return;
+  const val  = (document.getElementById("rateapplied").value || "").trim().toLowerCase();
+  const show = isLowerRateApplicable() || lowerModes.includes(val);
+  sec.style.display = show ? "block" : "none";
+  
+  const manualFields = document.getElementById("manual_lower_rate_fields");
+  const subTenderFields = document.getElementById("subsequent_tender_fields");
+  const subTenderSel = document.getElementById("subsequent_tenderid");
+  const selectedItem = document.getElementById("itemid").value;
+
+  if (isIGBTSelected()) {
+    if (manualFields) manualFields.style.display = "none";
+    if (subTenderFields) subTenderFields.style.display = "flex";
+    if (subTenderSel) {
+      const options = subTenderSel.querySelectorAll("option");
+      let anyVisible = false;
+      options.forEach(opt => {
+        if (!opt.value) return;
+        const isMatch = opt.getAttribute("data-itemid") === selectedItem;
+        opt.hidden = !isMatch;
+        if (isMatch && opt.selected) anyVisible = true;
+      });
+      if (subTenderSel.value && !anyVisible) {
+        subTenderSel.value = "";
+      }
+    }
+  } else {
+    if (manualFields) manualFields.style.display = "flex";
+    if (subTenderFields) subTenderFields.style.display = "none";
+    if (subTenderSel) subTenderSel.value = "";
+  }
+}
+
+function toggleTenderSection() {
+  const tenderSection = document.getElementById("tendersection");
+  const vendorSection = document.getElementById("vendorsection");
+  const tenderSel     = document.getElementById("tenderid");
+  const vendorSel     = document.getElementById("vendorid");
+  if (!tenderSection || !tenderSel) return;
+
+  const selectedItem = document.getElementById("itemid").value;
+  const options      = tenderSel.querySelectorAll("option");
+
+  if (isIGBTSelected()) {
+    tenderSection.style.display = "block";
+    tenderSel.required = true;
+    if (vendorSection) {
+      vendorSection.style.display = "block";
+      vendorSel.required = true;
+    }
+    let anyVisible = false;
+    options.forEach(opt => {
+      if (!opt.value) return;
+      const isMatch = opt.getAttribute("data-itemid") === selectedItem;
+      opt.hidden = !isMatch;
+      if (isMatch && opt.selected) anyVisible = true;
+    });
+    if (tenderSel.value && !anyVisible) {
+      tenderSel.value = "";
+      fillTenderData();
+    }
+    toggleVendorSection();
+  } else {
+    tenderSection.style.display = "none";
+    tenderSel.required = false;
+    tenderSel.value    = "";
+    if (vendorSection) {
+      vendorSection.style.display = "none";
+      vendorSel.required = false;
+      vendorSel.value = "";
+    }
+    fillTenderData();
+    options.forEach(opt => { opt.hidden = false; });
+  }
+}
+
+function toggleVendorSection() {
+  const tenderId = document.getElementById("tenderid").value;
+  const vendorSel = document.getElementById("vendorid");
+  if (!vendorSel) return;
+
+  const options = vendorSel.querySelectorAll("option");
+  let anyVisible = false;
+  options.forEach(opt => {
+    if (!opt.value) return;
+    const isMatch = opt.getAttribute("data-tenderid") === tenderId;
+    opt.hidden = !isMatch;
+    if (isMatch && opt.selected) anyVisible = true;
+  });
+  if (vendorSel.value && !anyVisible) {
+    vendorSel.value = "";
+    fillVendorData();
+  }
+}
+
+function toggleRefixedDP() {
+  const chk = document.getElementById("refixeddpchk");
+  const inp = document.getElementById("refixeddpinput");
+  if (!chk || !inp) return;
+  inp.disabled = !chk.checked;
+  if (!chk.checked) inp.value = "";
+  autoDetectRateApplied();
+}
+
+function toggleExtendedDP() {
+  const chk = document.getElementById("extendeddpchk");
+  const inp = document.getElementById("extendeddpinput");
+  if (!chk || !inp) return;
+  inp.disabled = !chk.checked;
+  if (!chk.checked) inp.value = "";
+  autoDetectRateApplied();
+}
+
+function fillTenderData() {
+  const tenderSel = document.getElementById("tenderid");
+  if (!tenderSel) return;
+  const opt = tenderSel.options[tenderSel.selectedIndex];
+
+  const set = (id, attr) => {
+    const el = document.getElementById(id);
+    if (el) el.value = (opt && opt.value) ? (opt.getAttribute(attr) || "") : "";
+  };
+
+  set("basicrate",          "data-basicrate");
+  set("pvcbasedate",        "data-pvcbasedate");
+}
+
+function fillVendorData() {
+  const vendorSel = document.getElementById("vendorid");
+  if (!vendorSel) return;
+  const opt = vendorSel.options[vendorSel.selectedIndex];
+
+  const set = (id, attr) => {
+    const el = document.getElementById(id);
+    if (el) el.value = (opt && opt.value) ? (opt.getAttribute(attr) || "") : "";
+  };
+
+  set("freightrateperunit", "data-freightrateperunit");
+}
+
+function renderExtraFields() {
+  const itemSel   = document.getElementById("itemid");
+  const section   = document.getElementById("itemextrasection");
+  const container = document.getElementById("itemextracontainer");
+  if (!itemSel || !section || !container) return;
+
+  container.innerHTML = "";
+
+  const opt = itemSel.options[itemSel.selectedIndex];
+  if (!opt || !opt.value) {
+    section.style.display = "none";
+    return;
+  }
+
+  let fields = [];
+  try {
+    fields = JSON.parse(opt.getAttribute("data-extra") || "[]");
+  } catch (e) {
+    fields = [];
+  }
+
+  if (!Array.isArray(fields) || fields.length === 0) {
+    section.style.display = "none";
+    return;
+  }
+
+  section.style.display = "block";
+
+  fields.forEach(f => {
+    const wrap     = document.createElement("div");
+    wrap.className = "mb-3";
+
+    const labelText = f.label || f.name || "Field";
+    const name      = f.name  || "extrafield";
+    const type      = f.type  || "text";
+    const stepAttr  = f.step     ? ` step="${f.step}"` : (type === "number" ? ' step="any"' : "");
+    const reqAttr   = f.required ? " required"         : "";
+
+    if (type === "checkbox") {
+      wrap.innerHTML = `
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" name="${name}" id="${name}" value="1">
+          <label class="form-check-label fw-semibold" for="${name}">${labelText}</label>
+        </div>`;
+
+    } else if (type === "select" && Array.isArray(f.options)) {
+      const optHtml = f.options
+        .map(o => `<option value="${o.value || o}">${o.label || o}</option>`)
+        .join("");
+      wrap.innerHTML = `
+        <label class="form-label fw-semibold" for="${name}">${labelText}</label>
+        <select class="form-select form-select-sm" name="${name}" id="${name}"${reqAttr}>
+          <option value="">-- Select --</option>
+          ${optHtml}
+        </select>`;
+
+    } else {
+      wrap.innerHTML = `
+        <label class="form-label fw-semibold" for="${name}">${labelText}</label>
+        <input class="form-control form-control-sm" type="${type}" name="${name}" id="${name}"${stepAttr}${reqAttr}>`;
+    }
+
+    container.appendChild(wrap);
+  });
+}
+
+// ════════════════════════════════════════════════════════════════[...]
+// AUTO-DETECT RATE APPLIED
+// ════════════════════════════════════════════════════════════════[...]
+
+function autoDetectRateApplied() {
+  const rateSel  = document.getElementById("rateapplied");
+  const badge    = document.getElementById("ratedetectbadge");
+  const badgeLbl = document.getElementById("ratedetectlabel");
+  const extChk   = document.getElementById("extendeddpchk");
+  if (!rateSel) return;
+
+  const supply   = parseDateByName("supdate");
+  const latestDP = getLatestDPDate();
+
+  if (!supply || !latestDP) {
+    if (badge) badge.style.display = "none";
+    return;
+  }
+
+  const dev             = isDevelopmental();
+  const lowerApplicable = isLowerRateApplicable();
+  let   newValue        = rateSel.value;
+  const extDP           = parseDateByName("extendeddp");
+
+  if (extChk && extChk.checked) {
+    if (!lowerApplicable) {
+      newValue = "Supply Beyond Original DP or Refixed DP";
+    } else {
+      if (dev || (extDP && supply <= extDP)) {
+        newValue = "Lower Rate Applicable Beyond DP Without LD";
+      } else {
+        newValue = "Lower Rate Applicable Beyond DP With LD";
+      }
+    }
+  } else if (supply <= latestDP) {
+    if (!lowerApplicable) {
+      newValue = "Supply Within Original DP or Refixed DP";
+    } else {
+      newValue = "Lower Rate Applicable Within DP";
+    }
+  } else {
+    if (!lowerApplicable) {
+      newValue = "Supply Beyond Original DP or Refixed DP";
+    } else {
+      if (dev) {
+        newValue = "Lower Rate Applicable Beyond DP Without LD";
+      } else {
+        const alreadyLower = newValue ? lowerModes.includes(newValue.toLowerCase()) : false;
+        if (!newValue || !alreadyLower) {
+          newValue = "Lower Rate Applicable Beyond DP With LD";
+        }
+      }
+    }
+  }
+
+  if (newValue && newValue !== rateSel.value) {
+    rateSel.value = newValue;
+  }
+
+  if (badge && badgeLbl && newValue) {
+    badgeLbl.textContent = rateLabels[newValue] || newValue;
+    badge.style.display  = "block";
+  }
+
+  toggleLowerRate();
+}
+
+// ════════════════════════════════════════════════════════════════[...]
+// DOMContentLoaded – single event binding block
+// ════════════════════════════════════════════════════════════════[...]
+
+document.addEventListener("DOMContentLoaded", () => {
+
+  document.getElementById("rateapplied")
+    .addEventListener("change", toggleLowerRate);
+
+  document.getElementById("itemid")
+    .addEventListener("change", () => {
+      toggleTenderSection();
+      renderExtraFields();
+    });
+
+  document.getElementById("tenderid")
+    .addEventListener("change", () => {
+      fillTenderData();
+      toggleVendorSection();
+    });
+
+  const vendorSelNode = document.getElementById("vendorid");
+  if (vendorSelNode) {
+    vendorSelNode.addEventListener("change", fillVendorData);
+  }
+
+  document.getElementById("refixeddpchk")
+    .addEventListener("change", toggleRefixedDP);
+
+  document.getElementById("extendeddpchk")
+    .addEventListener("change", toggleExtendedDP);
+
+  ["origdp", "refixeddp", "extendeddp", "supdate"].forEach(name => {
+    const el = document.getElementsByName(name)[0];
+    if (el) el.addEventListener("change", autoDetectRateApplied);
+  });
+
+  ["lowerrate", "lowerfreight", "lowerbasicdate"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("change", autoDetectRateApplied);
+  });
+
+  const lowerChk = document.getElementById("lowerrateapplicablechk");
+  if (lowerChk) {
+    lowerChk.addEventListener("change", () => {
+      toggleLowerRate();
+      autoDetectRateApplied();
+    });
+  }
+
+  const devChk = document.getElementById("developmentaltender");
+  if (devChk) {
+    devChk.addEventListener("change", autoDetectRateApplied);
+  }
+
+  // Initialise UI on page load
+  toggleLowerRate();
+  toggleTenderSection();
+  renderExtraFields();
+  toggleRefixedDP();
+  toggleExtendedDP();
+  autoDetectRateApplied();
+
+});
+</script>
+{% endblock %}

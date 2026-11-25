@@ -1,0 +1,63 @@
+/* static/css/custom.css */
+
+/* Global tweaks */
+body {
+  background-color: #f8f9fa;
+  color: #495057;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* Cards */
+.card {
+  border-radius: 0.5rem;
+  border: 1px solid #e3e6f0;
+  box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.05) !important;
+}
+
+.card-header {
+  background-color: #fff;
+  border-bottom: 1px solid #e3e6f0;
+}
+
+/* Tables */
+.table-sm td,
+.table-sm th {
+  padding: 0.5rem 0.75rem;
+  vertical-align: middle;
+}
+
+.table-light {
+  background-color: #f8f9fc;
+  color: #5a5c69;
+}
+
+/* History and admin tables */
+.table-hover tbody tr:hover {
+  background-color: #f4f6f9;
+}
+
+/* Form Inputs */
+.form-control, .form-select {
+  border-radius: 0.35rem;
+  border: 1px solid #d1d3e2;
+}
+.form-control:focus, .form-select:focus {
+  border-color: #bac8f3;
+  box-shadow: 0 0 0 0.2rem rgba(78, 115, 223, 0.25);
+}
+
+/* Navbar brand spacing */
+.navbar-brand {
+  font-weight: 600;
+}
+
+/* No-print helper */
+.no-print {
+  /* style only; hide in @media print rules in base.html or custom.css if you want */
+}
+
+/* Flash messages */
+.alert {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+}
