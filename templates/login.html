@@ -1,55 +1,129 @@
 {% extends "base.html" %}
-{% block title %}Login{% endblock %}
+{% block title %}Sign In — PVC Calculation Studio{% endblock %}
 
 {% block content %}
 <style>
-  body {
-    background: url('https://upload.wikimedia.org/wikipedia/commons/4/4e/Vande_Sadharan.jpg') no-repeat center center fixed !important;
-    background-size: cover !important;
+  nav.pvc-navbar, footer.pvc-footer { display: none !important; }
+  main.pvc-main { padding: 0 !important; display: flex; flex: 1 0 auto; }
+  main.pvc-main > .container-xl { max-width: 100% !important; padding: 0 !important; margin: 0 !important; display: flex; flex: 1 0 auto; }
+
+  .auth-shell {
+    position: relative;
+    width: 100%;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1rem;
+    background: #0f172a;
+    overflow: hidden;
   }
-  /* Hide standard navbar */
-  body > nav.navbar { display: none !important; }
-  body > .container { max-width: 100% !important; padding: 0 !important; margin: 0 !important; }
-  .card {
-    background-color: rgba(255, 255, 255, 0.94);
-    box-shadow: 0 15px 35px rgba(0,0,0,0.3);
-    backdrop-filter: blur(6px);
+
+  .auth-bg-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0.38;
+  }
+
+  .auth-scrim {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.88) 0%, rgba(15, 23, 42, 0.72) 100%);
+  }
+
+  .auth-card {
+    position: relative;
+    z-index: 2;
+    width: 100%;
+    max-width: 440px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    box-shadow: 0 24px 48px rgba(2, 6, 23, 0.38);
+    padding: 2rem 2.15rem;
   }
 </style>
 
-<!-- Custom Full-Width Header -->
-<div class="p-3 shadow-sm w-100 text-center mb-5" style="background: rgba(0,0,0,0.75); backdrop-filter: blur(8px);">
-  <h3 class="mb-0 text-white fw-bold"><i class="bi bi-train-front-fill me-2"></i> CLW Data Mining & Tools Portal</h3>
-</div>
+<div class="auth-shell">
+  <img
+    src="/src/assets/images/auth_backdrop_1795577314191.jpg"
+    alt="Architectural glass and steel backdrop"
+    class="auth-bg-img"
+    referrerpolicy="no-referrer"
+  >
+  <div class="auth-scrim"></div>
 
-<div class="container row justify-content-center mx-auto">
-  <div class="col-md-5">
-    <div class="card shadow-sm">
-      <div class="card-header bg-white py-3 border-bottom-0">
-        <h5 class="mb-0 text-primary fw-bold"><i class="bi bi-box-arrow-in-right me-1"></i> Login</h5>
+  <div class="auth-card">
+    <div class="d-flex align-items-center gap-3 mb-4">
+      <img
+        src="/src/assets/images/brand_mark_1795577313953.jpg"
+        alt="PVC Calculation Studio mark"
+        style="width:44px;height:44px;border-radius:10px;object-fit:cover;border:1px solid #e2e8f0;"
+        referrerpolicy="no-referrer"
+      >
+      <div>
+        <h4 class="fw-bold mb-0">PVC Calculation Studio</h4>
+        <div class="small text-muted">Developed by C. P. Chauhan</div>
       </div>
-      <div class="card-body">
-        <form method="post" action="">
-          <div class="mb-3">
-            <label class="form-label fw-semibold">Username</label>
-            <input type="text" name="username" class="form-control" required autofocus>
-          </div>
-          <div class="mb-3">
-            <label class="form-label fw-semibold">Password</label>
-            <input type="password" name="password" class="form-control" required>
-          </div>
-          <div class="d-flex justify-content-between align-items-center">
-            <button type="submit" class="btn btn-primary">
-              <i class="bi bi-box-arrow-in-right me-1"></i> Login
-            </button>
-            <a href="{{ url_for('auth.register') }}" class="small">Need an account? Register</a>
-          </div>
-        </form>
-        <div class="mt-3 pt-2 border-top small text-muted">
-          Default Admin: <code>admin</code> / <code>admin123</code> &nbsp;|&nbsp; Operator: <code>operator</code> / <code>user123</code>
+    </div>
+
+    {% if login_error %}
+      <div class="alert alert-danger py-2 small mb-3" role="alert">
+        <i class="bi bi-exclamation-circle me-1"></i>{{ login_error }}
+      </div>
+    {% endif %}
+
+    {% set messages = get_flashed_messages(true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }} py-2 small mb-3" role="alert">
+          {{ message }}
         </div>
+      {% endfor %}
+    {% endif %}
+
+    <form method="post" action="{{ url_for('auth.login') }}">
+      <div class="mb-3">
+        <label class="form-label" for="loginUsername">Username</label>
+        <input id="loginUsername" type="text" name="username" class="form-control" value="{{ entered_username or '' }}" placeholder="Enter your username" autocomplete="username" required autofocus>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="loginPassword">Password</label>
+        <input id="loginPassword" type="password" name="password" class="form-control" placeholder="Enter your password" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn btn-primary w-100 py-2 mt-1">
+        <i class="bi bi-box-arrow-in-right me-1"></i> Sign In
+      </button>
+    </form>
+
+    <div class="d-flex justify-content-between align-items-center mt-3 pt-3 border-top small">
+      <span class="text-muted">New user?</span>
+      <a href="{{ url_for('auth.register') }}" class="fw-semibold text-decoration-none">Create an account</a>
+    </div>
+
+    <div class="mt-3 p-3 rounded bg-light border small text-muted">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <span>Admin: <code>admin</code> / <code>admin123</code></span>
+        <button type="button" class="btn btn-sm btn-outline-primary py-0 px-2" onclick="fillAndFocus('admin','admin123')">Use Admin</button>
+      </div>
+      <div class="d-flex justify-content-between align-items-center">
+        <span>Operator: <code>operator</code> / <code>user123</code></span>
+        <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="fillAndFocus('operator','user123')">Use Operator</button>
       </div>
     </div>
   </div>
 </div>
+<script>
+function fillAndFocus(u, p) {
+  var uEl = document.getElementById('loginUsername');
+  var pEl = document.getElementById('loginPassword');
+  if (uEl) uEl.value = u;
+  if (pEl) pEl.value = p;
+  var form = uEl && uEl.closest('form');
+  if (form) form.submit();
+}
+</script>
 {% endblock %}

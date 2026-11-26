@@ -1,53 +1,60 @@
 {% extends "base.html" %}
-{% block title %}Items{% endblock %}
+{% block title %}Items &amp; Indices — PVC Calculation Studio{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h3 class="mb-1">Items</h3>
-  {% if current_user.is_admin %}
+<div class="pvc-page-header">
   <div>
-    <button type="button" class="btn btn-outline-secondary me-2" onclick="window.history.back()"><i class="bi bi-arrow-left"></i> Back</button>
-    <a href="{{ url_for('admin.items_new') }}" class="btn btn-primary">
-      <i class="bi bi-plus-circle"></i> Add Item
+    <h1 class="pvc-page-title">Items &amp; PVC Formulas</h1>
+  </div>
+  {% if current_user.is_admin %}
+  <div class="d-flex flex-wrap gap-2">
+    <a href="{{ url_for('admin.items_new') }}" class="btn btn-primary btn-sm">
+      <i class="bi bi-plus-circle me-1"></i>Add Item
     </a>
   </div>
   {% endif %}
 </div>
 
 {% if items %}
-<div class="card shadow-sm">
+<div class="card">
   <div class="card-body p-0">
     <div class="table-responsive">
-      <table class="table table-sm table-bordered table-hover mb-0 align-middle">
-        <thead class="table-light">
+      <table class="table table-hover mb-0 align-middle">
+        <thead>
           <tr>
-            <th>ID</th>
-            <th>Name</th>
+            <th style="width: 60px;">ID</th>
+            <th>Item</th>
             <th>Code</th>
-            <th>Formula Code</th>
-            <th>Actions</th>
+            <th>Formula</th>
+            <th class="text-center">Lag</th>
+            <th>Index Source</th>
+            <th class="text-end" style="width: 260px;">Actions</th>
           </tr>
         </thead>
         <tbody>
           {% for it in items %}
           <tr>
-            <td>{{ it.id }}</td>
-            <td>{{ it.name }}</td>
-            <td>{{ it.code or '-' }}</td>
-            <td>{{ it.pvc_formula_code }}</td>
-            <td>
-              {% if current_user.is_admin %}
-              <a href="{{ url_for('admin.items_edit', itemid=it.id) }}" class="btn btn-sm btn-secondary me-1">
-                Edit
-              </a>
-              {% endif %}
-              <a href="{{ url_for('admin.item_indices_list', itemid=it.id) }}" class="btn btn-sm btn-outline-primary">
-                Indices
+            <td class="mono-num text-muted">#{{ it.id }}</td>
+            <td class="fw-semibold text-dark">{{ it.name }}</td>
+            <td class="mono-num small">{{ it.code or '—' }}</td>
+            <td class="mono-num small fw-semibold text-primary">{{ it.pvc_formula_code }}</td>
+            <td class="text-center mono-num small">{{ it.lag_months if it.lag_months != null else 1 }}m</td>
+            <td class="small text-muted">{{ it.index_source or 'IEEMA' }}</td>
+            <td class="text-end text-nowrap">
+              <a href="{{ url_for('admin.item_indices_list', itemid=it.id) }}" class="btn btn-sm btn-primary me-1">
+                <i class="bi bi-calendar3 me-1"></i>Monthly Indices
               </a>
               {% if current_user.is_admin %}
-              <form method="post" action="{{ url_for('admin.items_delete', itemid=it.id) }}" class="d-inline"
-                      onsubmit="return confirm('Delete item {{ it.name }}?')">
-                  <button class="btn btn-sm btn-danger">Delete</button>
+              <a href="{{ url_for('admin.items_edit', itemid=it.id) }}" class="btn btn-sm btn-outline-secondary me-1">
+                <i class="bi bi-pencil"></i> Edit
+              </a>
+              <form method="post"
+                    action="{{ url_for('admin.items_delete', itemid=it.id) }}"
+                    class="d-inline"
+                    onsubmit="return requestDeleteConfirm(this, 'Delete item {{ it.name | replace("'", "\\'") }} and all its monthly indices?')">
+                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete item">
+                  <i class="bi bi-trash"></i>
+                </button>
               </form>
               {% endif %}
             </td>
@@ -59,6 +66,10 @@
   </div>
 </div>
 {% else %}
-<div class="alert alert-info">No items found.</div>
+<div class="card">
+  <div class="card-body text-center py-5 text-muted">
+    <p class="mb-0">No items configured.</p>
+  </div>
+</div>
 {% endif %}
 {% endblock %}

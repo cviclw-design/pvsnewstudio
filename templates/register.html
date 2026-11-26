@@ -1,77 +1,121 @@
 {% extends "base.html" %}
-{% block title %}Register{% endblock %}
+{% block title %}Register — PVC Calculation Studio{% endblock %}
 
 {% block content %}
 <style>
-  body {
-    background: url('https://upload.wikimedia.org/wikipedia/commons/4/4e/Vande_Sadharan.jpg') no-repeat center center fixed !important;
-    background-size: cover !important;
+  nav.pvc-navbar, footer.pvc-footer { display: none !important; }
+  main.pvc-main { padding: 0 !important; display: flex; flex: 1 0 auto; }
+  main.pvc-main > .container-xl { max-width: 100% !important; padding: 0 !important; margin: 0 !important; display: flex; flex: 1 0 auto; }
+
+  .auth-shell {
+    position: relative;
+    width: 100%;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1rem;
+    background: #0f172a;
+    overflow: hidden;
   }
-  /* Hide standard navbar */
-  body > nav.navbar { display: none !important; }
-  body > .container { max-width: 100% !important; padding: 0 !important; margin: 0 !important; }
-  .card {
-    background-color: rgba(255, 255, 255, 0.94);
-    box-shadow: 0 15px 35px rgba(0,0,0,0.3);
-    backdrop-filter: blur(6px);
+
+  .auth-bg-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0.38;
+  }
+
+  .auth-scrim {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.88) 0%, rgba(15, 23, 42, 0.72) 100%);
+  }
+
+  .auth-card {
+    position: relative;
+    z-index: 2;
+    width: 100%;
+    max-width: 560px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    box-shadow: 0 24px 48px rgba(2, 6, 23, 0.38);
+    padding: 2rem 2.15rem;
   }
 </style>
 
-<!-- Custom Full-Width Header -->
-<div class="p-3 shadow-sm w-100 text-center mb-4" style="background: rgba(0,0,0,0.75); backdrop-filter: blur(8px);">
-  <h3 class="mb-0 text-white fw-bold"><i class="bi bi-train-front-fill me-2"></i> CLW Data Mining & Tools Portal</h3>
-</div>
+<div class="auth-shell">
+  <img
+    src="/src/assets/images/auth_backdrop_1795577314191.jpg"
+    alt="Architectural glass and steel backdrop"
+    class="auth-bg-img"
+    referrerpolicy="no-referrer"
+  >
+  <div class="auth-scrim"></div>
 
-<div class="container row justify-content-center mx-auto pb-4">
-  <div class="col-md-6">
-    <div class="card shadow-sm">
-      <div class="card-header bg-white py-3 border-bottom-0">
-        <h5 class="mb-0 text-success fw-bold"><i class="bi bi-person-plus me-1"></i> Create Account</h5>
-      </div>
-      <div class="card-body">
-        <form method="post" action="{{ url_for('auth.register') }}">
-          <div class="row g-3">
-            <div class="col-md-6">
-              <label class="form-label fw-semibold">Username</label>
-              <input type="text" name="username" class="form-control" required>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label fw-semibold">Email (optional)</label>
-              <input type="email" name="email" class="form-control">
-            </div>
-            <div class="col-md-6">
-              <label class="form-label fw-semibold">Password</label>
-              <input type="password" name="password" class="form-control" required>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label fw-semibold">Full Name</label>
-              <input type="text" name="fullname" class="form-control">
-            </div>
-            <div class="col-md-6">
-              <label class="form-label fw-semibold">Contact No</label>
-              <input type="text" name="contactno" class="form-control">
-            </div>
-            <div class="col-md-6">
-              <label class="form-label fw-semibold">Designation</label>
-              <input type="text" name="designation" class="form-control">
-            </div>
-            <div class="col-md-6">
-              <label class="form-label fw-semibold">Control No</label>
-              <input type="text" name="controlno" class="form-control">
-            </div>
-          </div>
-
-          <div class="d-flex justify-content-between align-items-center mt-3">
-            <button type="submit" class="btn btn-success">
-              <i class="bi bi-check2-circle me-1"></i> Register
-            </button>
-            <a href="{{ url_for('auth.login') }}" class="small">
-              Already have an account? Login
-            </a>
-          </div>
-        </form>
+  <div class="auth-card">
+    <div class="d-flex align-items-center gap-3 mb-4">
+      <img
+        src="/src/assets/images/brand_mark_1795577313953.jpg"
+        alt="PVC Calculation Studio mark"
+        style="width:44px;height:44px;border-radius:10px;object-fit:cover;border:1px solid #e2e8f0;"
+        referrerpolicy="no-referrer"
+      >
+      <div>
+        <h4 class="fw-bold mb-0">Create Account</h4>
+        <div class="small text-muted">PVC Calculation Studio &middot; Developed by C. P. Chauhan</div>
       </div>
     </div>
+
+    {% set messages = get_flashed_messages(true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }} py-2 small mb-3" role="alert">
+          {{ message }}
+        </div>
+      {% endfor %}
+    {% endif %}
+
+    <form method="post" action="{{ url_for('auth.register') }}">
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label">Username</label>
+          <input type="text" name="username" class="form-control" required autofocus>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Email (optional)</label>
+          <input type="email" name="email" class="form-control">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Password</label>
+          <input type="password" name="password" class="form-control" required>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Full Name</label>
+          <input type="text" name="fullname" class="form-control">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Designation / Role</label>
+          <input type="text" name="designation" class="form-control">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Reference ID (optional)</label>
+          <input type="text" name="controlno" class="form-control">
+        </div>
+      </div>
+
+      <div class="d-flex justify-content-between align-items-center mt-4 pt-3 border-top">
+        <a href="{{ url_for('auth.login') }}" class="small fw-semibold text-decoration-none">
+          Already have an account? Sign In
+        </a>
+        <button type="submit" class="btn btn-primary px-4">
+          <i class="bi bi-check2-circle me-1"></i> Register
+        </button>
+      </div>
+    </form>
   </div>
 </div>
 {% endblock %}

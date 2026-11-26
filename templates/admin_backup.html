@@ -3,52 +3,58 @@
 {% block title %}Database Backups{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
-    <div class="row mb-3">
-        <div class="col">
-            <h2>Database Backups</h2>
-        </div>
-        <div class="col text-end">
-            <form action="{{ url_for('admin.backup_now') }}" method="POST" class="d-inline">
-                <button type="submit" class="btn btn-primary" onclick="return confirm('Are you sure you want to create a new database backup?');">
-                    <i class="fas fa-database me-2"></i>Create Backup Now
-                </button>
-            </form>
-        </div>
-    </div>
+<div class="pvc-page-header">
+  <div>
+    <div class="pvc-section-label">System Administration</div>
+    <h1 class="pvc-page-title">Database Backups</h1>
+  </div>
+  <div class="d-flex gap-2">
+    <form action="{{ url_for('admin.backup_now') }}" method="post" class="d-inline">
+      <button type="submit" class="btn btn-primary">
+        <i class="bi bi-database-add me-1"></i>Create Backup Now
+      </button>
+    </form>
+  </div>
+</div>
 
-    <div class="card">
-        <div class="card-header">Existing Backups</div>
-        <div class="card-body">
-            {% if files %}
-            <ul class="list-group list-group-flush">
-                {% for file in files %}
-                <li class="list-group-item d-flex justify-content-between align-items-center">
-                    <div>
-                        {% if file.endsWith('.sql') %}
-                            <i class="fas fa-file-code text-muted me-2"></i>
-                        {% else %}
-                            <i class="fas fa-file-archive text-muted me-2"></i>
-                        {% endif %}
-                        <code>{{ file }}</code>
-                    </div>
-                    <div>
-                        <a href="{{ url_for('admin.download_backup', filename=file) }}" class="btn btn-sm btn-outline-secondary">
-                            <i class="fas fa-download me-1"></i> Download
-                        </a>
-                        <form action="{{ url_for('admin.delete_backup', filename=file) }}" method="POST" class="d-inline ms-1">
-                            <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Are you sure you want to delete this backup file? This action cannot be undone.');">
-                                <i class="fas fa-trash-alt"></i>
-                            </button>
-                        </form>
-                    </div>
-                </li>
-                {% endfor %}
-            </ul>
-            {% else %}
-            <p class="text-muted">No backup files found.</p>
-            {% endif %}
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <h6 class="fw-bold mb-0"><i class="bi bi-archive me-2 text-primary"></i>Existing Backups</h6>
+    <span class="mono-num small text-muted">{{ files | length if files else 0 }} snapshot(s)</span>
+  </div>
+  <div class="card-body p-0">
+    {% if files and files | length > 0 %}
+    <ul class="list-group list-group-flush">
+      {% for file in files %}
+      <li class="list-group-item d-flex justify-content-between align-items-center py-3 px-4">
+        <div class="d-flex align-items-center gap-2">
+          <i class="bi bi-file-earmark-code text-primary fs-5"></i>
+          <code class="mono-num">{{ file }}</code>
         </div>
+        <div class="d-flex gap-2">
+          <a href="{{ url_for('admin.download_backup', filename=file) }}" class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-download me-1"></i>Download
+          </a>
+          <form
+            action="{{ url_for('admin.delete_backup', filename=file) }}"
+            method="post"
+            class="d-inline"
+            onsubmit="return requestDeleteConfirm(this, 'Delete backup file {{ file | replace("'", "\\'") }}? This action cannot be undone.')"
+          >
+            <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete backup">
+              <i class="bi bi-trash"></i>
+            </button>
+          </form>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <div class="text-center py-5 text-muted">
+      <i class="bi bi-archive fs-2 d-block mb-2 text-secondary"></i>
+      <p class="mb-0">No backup files found.</p>
     </div>
+    {% endif %}
+  </div>
 </div>
 {% endblock %}

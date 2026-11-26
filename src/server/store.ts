@@ -2,6 +2,7 @@ import fs from 'fs';
 import bcrypt from 'bcryptjs';
 import {
   AuditLogRecord,
+  IndexAttachment,
   ItemIndexRecord,
   ItemRecord,
   Pagination,
@@ -36,10 +37,6 @@ function generateMonthlyIndices(): ItemIndexRecord[] {
   const rows: ItemIndexRecord[] = [];
   let id = 1;
 
-  // Deterministic realistic monthly index progression from Jan 2022 to Dec 2026
-  // Item 1: IGBT Propulsion System (C, AL, FE, IM, W, D, ER_EUR, ER_USD, ER_JPY)
-  // Item 2: 3-Phase Traction Motor (C, AL, FE, IM, W)
-  // Item 3: Main Traction Transformer (C, AL, FE, IM, W)
   for (let year = 2022; year <= 2026; year++) {
     for (let month = 1; month <= 12; month++) {
       const idxOffset = (year - 2022) * 12 + (month - 1);
@@ -56,28 +53,28 @@ function generateMonthlyIndices(): ItemIndexRecord[] {
       const ER_USD = Number((77.2 + idxOffset * 0.15 + Math.cos(idxOffset * 0.25) * 0.7).toFixed(2));
       const ER_JPY = Number((0.62 - idxOffset * 0.001 + wave * 0.01).toFixed(4));
 
-      // Item 1: IGBT Propulsion System
       rows.push({
         id: id++,
         item_id: 1,
         month: monthStr,
         indices_json: JSON.stringify({ C, AL, FE, IM, W, D, ER_EUR, ER_USD, ER_JPY }),
+        attachments: [],
       });
 
-      // Item 2: 3-Phase Traction Motor
       rows.push({
         id: id++,
         item_id: 2,
         month: monthStr,
         indices_json: JSON.stringify({ C, AL, FE, IM, W }),
+        attachments: [],
       });
 
-      // Item 3: Main Traction Transformer
       rows.push({
         id: id++,
         item_id: 3,
         month: monthStr,
         indices_json: JSON.stringify({ C, AL, FE, IM, W }),
+        attachments: [],
       });
     }
   }
@@ -92,22 +89,22 @@ function createInitialState(): StoreState {
     {
       id: 1,
       username: 'admin',
-      full_name: 'CLW Administrator',
-      email: 'admin@clw.indianrailways.gov.in',
-      contact_no: '9163340563',
-      designation: 'Senior Accounts Officer',
-      control_no: 'CLW-001',
+      full_name: 'C. P. Chauhan',
+      email: 'admin@pvcstudio.local',
+      contact_no: null,
+      designation: 'Principal Consultant',
+      control_no: 'PVC-001',
       password_hash: adminHash,
       is_admin: true,
     },
     {
       id: 2,
       username: 'operator',
-      full_name: 'PVC Bill Clerk',
-      email: 'operator@clw.indianrailways.gov.in',
-      contact_no: '9000000001',
-      designation: 'Accounts Assistant',
-      control_no: 'CLW-002',
+      full_name: 'Costing Analyst',
+      email: 'operator@pvcstudio.local',
+      contact_no: null,
+      designation: 'Accounts & Costing Analyst',
+      control_no: 'PVC-002',
       password_hash: userHash,
       is_admin: false,
     },
@@ -118,28 +115,64 @@ function createInitialState(): StoreState {
       id: 1,
       name: 'IGBT Propulsion System',
       code: '29180010',
-      description: '3-Phase IGBT Based Propulsion Equipment for WAG-9 / WAP-7 Locomotives',
+      description: '3-Phase IGBT Power Converter & Propulsion Equipment',
       pvc_formula_code: 'IGBTPROPULSIONSYSTEM',
       weights_json: JSON.stringify({ FIXED: 16, C: 26, AL: 13, FE: 18, IM: 9, W: 18 }),
       extra_fields_json: '[]',
+      lag_months: 1,
+      base_lag_months: 0,
+      fixed_weight: 16,
+      index_source: 'IEEMA & Reserve Bank of India (RBI)',
+      components_json: JSON.stringify([
+        { key: 'C', label: 'Copper', weight: 26, lag_months: 1, source: 'IEEMA' },
+        { key: 'AL', label: 'Aluminium', weight: 13, lag_months: 1, source: 'IEEMA' },
+        { key: 'FE', label: 'Iron & Steel', weight: 18, lag_months: 1, source: 'Office of the Economic Adviser, Govt. of India (WPI)' },
+        { key: 'IM', label: 'Insulating Material', weight: 9, lag_months: 1, source: 'IEEMA' },
+        { key: 'W', label: 'Labour / Wage', weight: 18, lag_months: 1, source: 'Labour Bureau, Govt. of India (CPI-IW)' },
+      ]),
+      custom_formula: null,
     },
     {
       id: 2,
-      name: '3-Phase Traction Motor',
+      name: '3-Phase AC Traction Motor',
       code: '29150045',
-      description: '6FRA6068 Three Phase Traction Motor (2-month index lag)',
+      description: '3-Phase AC Industrial Traction Motor',
       pvc_formula_code: 'TRACTIONMOTOR',
-      weights_json: JSON.stringify({ C: 25, AL: 10, FE: 20, IM: 15, W: 15 }),
+      weights_json: JSON.stringify({ FIXED: 15, C: 25, AL: 10, FE: 20, IM: 15, W: 15 }),
       extra_fields_json: '[]',
+      lag_months: 2,
+      base_lag_months: 0,
+      fixed_weight: 15,
+      index_source: 'IEEMA',
+      components_json: JSON.stringify([
+        { key: 'C', label: 'Copper', weight: 25, lag_months: 2, source: 'IEEMA' },
+        { key: 'AL', label: 'Aluminium', weight: 10, lag_months: 2, source: 'IEEMA' },
+        { key: 'FE', label: 'Steel / Iron', weight: 20, lag_months: 2, source: 'Office of the Economic Adviser, Govt. of India (WPI)' },
+        { key: 'IM', label: 'Insulating Material', weight: 15, lag_months: 2, source: 'IEEMA' },
+        { key: 'W', label: 'Labour / Wage', weight: 15, lag_months: 2, source: 'IEEMA' },
+      ]),
+      custom_formula: null,
     },
     {
       id: 3,
-      name: 'Main Traction Transformer',
+      name: 'Main Power Transformer',
       code: '29160022',
-      description: '6531 kVA Main Traction Transformer (IEEMA PVC)',
+      description: '6531 kVA High-Voltage Power Transformer',
       pvc_formula_code: 'POWERTRFIEEMA',
-      weights_json: JSON.stringify({ C: 30, AL: 10, FE: 25, IM: 10, W: 10 }),
+      weights_json: JSON.stringify({ FIXED: 15, C: 30, AL: 10, FE: 25, IM: 10, W: 10 }),
       extra_fields_json: '[]',
+      lag_months: 1,
+      base_lag_months: 0,
+      fixed_weight: 15,
+      index_source: 'IEEMA',
+      components_json: JSON.stringify([
+        { key: 'C', label: 'Copper', weight: 30, lag_months: 1, source: 'IEEMA' },
+        { key: 'AL', label: 'Aluminium', weight: 10, lag_months: 1, source: 'IEEMA' },
+        { key: 'FE', label: 'CRGO / Steel', weight: 25, lag_months: 1, source: 'IEEMA' },
+        { key: 'IM', label: 'Insulating Material', weight: 10, lag_months: 1, source: 'IEEMA' },
+        { key: 'W', label: 'Labour / Wage', weight: 10, lag_months: 1, source: 'IEEMA' },
+      ]),
+      custom_formula: null,
     },
   ];
 
@@ -149,7 +182,7 @@ function createInitialState(): StoreState {
     {
       id: 1,
       item_id: 1,
-      tender_no: 'CLW/EL/IGBT/2023/001',
+      tender_no: 'TND/EL/IGBT/2023/001',
       basicrate: 28500000,
       pvcbasedate: '2023-03-01',
       created_at: '2023-03-15T10:00:00.000Z',
@@ -157,7 +190,7 @@ function createInitialState(): StoreState {
     {
       id: 2,
       item_id: 1,
-      tender_no: 'CLW/EL/IGBT/2024/002',
+      tender_no: 'TND/EL/IGBT/2024/002',
       basicrate: 27400000,
       pvcbasedate: '2024-04-01',
       created_at: '2024-04-10T10:00:00.000Z',
@@ -165,7 +198,7 @@ function createInitialState(): StoreState {
     {
       id: 3,
       item_id: 2,
-      tender_no: 'CLW/EL/TM/2023/105',
+      tender_no: 'TND/EL/TM/2023/105',
       basicrate: 3250000,
       pvcbasedate: '2023-06-01',
       created_at: '2023-06-12T10:00:00.000Z',
@@ -173,7 +206,7 @@ function createInitialState(): StoreState {
     {
       id: 4,
       item_id: 3,
-      tender_no: 'CLW/EL/TRF/2024/088',
+      tender_no: 'TND/EL/TRF/2024/088',
       basicrate: 7850000,
       pvcbasedate: '2024-01-01',
       created_at: '2024-01-20T10:00:00.000Z',
@@ -184,7 +217,7 @@ function createInitialState(): StoreState {
     {
       id: 1,
       tender_id: 1,
-      po_no: '2123500101',
+      po_no: 'PO23500101',
       vendor_name: 'M/s BHEL',
       cif: 6200000,
       freightrateperunit: 85000,
@@ -193,7 +226,7 @@ function createInitialState(): StoreState {
     {
       id: 2,
       tender_id: 1,
-      po_no: '2123500102',
+      po_no: 'PO23500102',
       vendor_name: 'M/s Medha Servo Drives',
       cif: 5850000,
       freightrateperunit: 78000,
@@ -202,7 +235,7 @@ function createInitialState(): StoreState {
     {
       id: 3,
       tender_id: 1,
-      po_no: '2123500103',
+      po_no: 'PO23500103',
       vendor_name: 'M/s ABB India Ltd',
       cif: 6400000,
       freightrateperunit: 82000,
@@ -211,7 +244,7 @@ function createInitialState(): StoreState {
     {
       id: 4,
       tender_id: 2,
-      po_no: '2124500201',
+      po_no: 'PO24500201',
       vendor_name: 'M/s BHEL',
       cif: 5900000,
       freightrateperunit: 80000,
@@ -220,7 +253,7 @@ function createInitialState(): StoreState {
     {
       id: 5,
       tender_id: 2,
-      po_no: '2124500202',
+      po_no: 'PO24500202',
       vendor_name: 'M/s Medha Servo Drives',
       cif: 5600000,
       freightrateperunit: 75000,
@@ -229,7 +262,7 @@ function createInitialState(): StoreState {
     {
       id: 6,
       tender_id: 3,
-      po_no: '2123600301',
+      po_no: 'PO23600301',
       vendor_name: 'M/s CG Power',
       cif: 0,
       freightrateperunit: 22000,
@@ -238,7 +271,7 @@ function createInitialState(): StoreState {
     {
       id: 7,
       tender_id: 4,
-      po_no: '2124700401',
+      po_no: 'PO24700401',
       vendor_name: 'M/s Hind Rectifiers',
       cif: 0,
       freightrateperunit: 45000,
@@ -279,6 +312,20 @@ class MemoryStore {
         const raw = fs.readFileSync(SNAPSHOT_PATH, 'utf-8');
         const parsed = JSON.parse(raw) as StoreState;
         if (parsed && Array.isArray(parsed.users) && Array.isArray(parsed.items)) {
+          for (const idx of parsed.itemIndices || []) {
+            if (!Array.isArray(idx.attachments)) idx.attachments = [];
+          }
+          for (const it of parsed.items || []) {
+            if (it.lag_months === undefined || it.lag_months === null) {
+              it.lag_months = (it.pvc_formula_code || '').toUpperCase() === 'TRACTIONMOTOR' ? 2 : 1;
+            }
+            if (it.base_lag_months === undefined || it.base_lag_months === null) {
+              it.base_lag_months = 0;
+            }
+            if (it.index_source === undefined) {
+              it.index_source = 'IEEMA';
+            }
+          }
           return parsed;
         }
       }
@@ -333,7 +380,8 @@ class MemoryStore {
   }
 
   getUserByUsername(username: string): UserRecord | undefined {
-    return this.state.users.find((u) => u.username === username);
+    const normalized = username.trim().toLowerCase();
+    return this.state.users.find((u) => u.username.trim().toLowerCase() === normalized);
   }
 
   hasAdmin(): boolean {
@@ -424,7 +472,11 @@ class MemoryStore {
   }
 
   createItemIndex(input: Omit<ItemIndexRecord, 'id'>, actorId: number | null = null): ItemIndexRecord {
-    const row: ItemIndexRecord = { id: this.state.nextIds.itemIndices++, ...input };
+    const row: ItemIndexRecord = {
+      id: this.state.nextIds.itemIndices++,
+      attachments: [],
+      ...input,
+    };
     this.state.itemIndices.push(row);
     this.logAudit(actorId, 'INSERT', 'item_index', row.id, null, row);
     return row;
@@ -440,8 +492,38 @@ class MemoryStore {
     if (!row) return undefined;
     const oldSnap = { ...row };
     Object.assign(row, patch);
+    if (!Array.isArray(row.attachments)) row.attachments = [];
     this.logAudit(actorId, 'UPDATE', 'item_index', row.id, oldSnap, row);
     return row;
+  }
+
+  addIndexAttachments(
+    itemId: number,
+    rowId: number,
+    newAttachments: IndexAttachment[],
+    actorId: number | null = null
+  ): ItemIndexRecord | undefined {
+    const row = this.getItemIndexById(itemId, rowId);
+    if (!row) return undefined;
+    if (!Array.isArray(row.attachments)) row.attachments = [];
+    row.attachments.push(...newAttachments);
+    this.logAudit(actorId, 'UPDATE', 'item_index', row.id, null, { added_attachments: newAttachments.map((a) => a.original_name) });
+    return row;
+  }
+
+  removeIndexAttachment(
+    itemId: number,
+    rowId: number,
+    attachmentId: string,
+    actorId: number | null = null
+  ): IndexAttachment | undefined {
+    const row = this.getItemIndexById(itemId, rowId);
+    if (!row || !Array.isArray(row.attachments)) return undefined;
+    const idx = row.attachments.findIndex((a) => a.id === attachmentId);
+    if (idx === -1) return undefined;
+    const [removed] = row.attachments.splice(idx, 1);
+    this.logAudit(actorId, 'UPDATE', 'item_index', row.id, { removed_attachment: removed.original_name }, null);
+    return removed;
   }
 
   deleteItemIndex(itemId: number, rowId: number, actorId: number | null = null): boolean {
@@ -610,7 +692,7 @@ class MemoryStore {
   exportBackup(): Record<string, unknown> {
     return {
       exported_at: new Date().toISOString(),
-      app: 'CLW PVC Calculation System',
+      app: 'PVC Calculation Studio',
       counts: {
         users: this.state.users.length,
         items: this.state.items.length,
@@ -632,9 +714,10 @@ class MemoryStore {
     };
   }
 
-  getStats(): { totalCalculations: number; activeContracts: number; systemUsers: number } {
+  getStats(): { totalCalculations: number; totalItems: number; activeContracts: number; systemUsers: number } {
     return {
       totalCalculations: this.state.pvcResults.length,
+      totalItems: this.state.items.length,
       activeContracts: this.state.tenders.length,
       systemUsers: this.state.users.length,
     };

@@ -9,7 +9,12 @@ import {
   safeFloat,
 } from '../pvcEngine.js';
 import { store } from '../store.js';
-import { PVCInputData, TenderMasterRecord, TenderVendorRecord } from '../types.js';
+import {
+  PVCInputData,
+  ScenarioDetail,
+  TenderMasterRecord,
+  TenderVendorRecord,
+} from '../types.js';
 import { flashMessage, requireLogin } from './auth.js';
 
 export const pvcRouter = express.Router();
@@ -20,6 +25,13 @@ const SC_MAP: Record<string, string> = {
   B2: 'Contractual PVC',
   C1: 'Lower Actual PVC',
   D1: 'Lower Contractual PVC',
+};
+
+const SC_SUBTITLE: Record<string, string> = {
+  A2: 'Base Rate · Call Date',
+  B2: 'Base Rate · Scheduled DP',
+  C1: 'Lower Rate · Call Date',
+  D1: 'Lower Rate · Scheduled DP',
 };
 
 function sanitizeNum(v: unknown): number | null {
@@ -44,7 +56,6 @@ function normalizeExcelDate(val: unknown): string | null {
     return val.toISOString().slice(0, 10);
   }
   if (typeof val === 'number' && val > 20000 && val < 90000) {
-    // Excel serial date
     const parsed = XLSX.SSF.parse_date_code(val);
     if (parsed) {
       return `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`;
@@ -55,6 +66,119 @@ function normalizeExcelDate(val: unknown): string | null {
     return dt.toISOString().slice(0, 10);
   }
   return String(val).trim() || null;
+}
+
+export interface ComparisonRow {
+  code: string;
+  label: string;
+  subtitle: string;
+  gross: number;
+  ld: number;
+  net: number;
+  pvcPerSet: number | null;
+  pvcPercent: number | null;
+  isSelected: boolean;
+  isLowest: boolean;
+  varianceFromFair: number;
+  barPct: number;
+}
+
+function buildComparisonSummary(payload: Record<string, unknown>, rateAppliedRaw: string | null | undefined) {
+  const rateApplied = String(rateAppliedRaw || '').trim().toLowerCase();
+  const b2Needed = !['supply before due date', 'supply within original dp or refixed dp', 'lower rate applicable within dp'].includes(rateApplied);
+  const scenarioAmounts = (payload.scenarioamounts as Record<string, number | null>) || {};
+  const scenariodetails = (payload.scenariodetails as ScenarioDetail[]) || [];
+  const pctMap = new Map<string, number>();
+  for (const d of scenariodetails) {
+    pctMap.set(d.scenario, Number(d.pvcpercent ?? 0));
+  }
+
+  const ldApplicable = Boolean(payload.ldapplicable);
+  const selectedScenario = String(payload.selectedscenario || 'A2');
+
+  const rawCandidates: Array<{
+    code: string;
+    gross: number | null;
+    ld: number;
+    net: number | null;
+    pvcPerSet: number | null;
+    show: boolean;
+  }> = [
+    {
+      code: 'A2',
+      gross: sanitizeNum(payload.pvcactual),
+      ld: ldApplicable ? Number(payload.ldamtactual || 0) : 0,
+      net: sanitizeNum(payload.pvcactuallessldnew) ?? sanitizeNum(payload.pvcactual),
+      pvcPerSet: sanitizeNum(payload.pvcperseta2),
+      show: true,
+    },
+    {
+      code: 'B2',
+      gross: sanitizeNum(payload.pvccontractual),
+      ld: ldApplicable ? Number(payload.ldamtcontractual || 0) : 0,
+      net: sanitizeNum(payload.pvccontractuallessldnew) ?? sanitizeNum(payload.pvccontractual),
+      pvcPerSet: sanitizeNum(payload.pvcpersetb2),
+      show: b2Needed && sanitizeNum(payload.pvccontractual) !== null,
+    },
+    {
+      code: 'C1',
+      gross: sanitizeNum(payload.loweractual),
+      ld: 0,
+      net:
+        rateApplied.includes('further') && sanitizeNum(payload.loweractuallessld) !== null
+          ? sanitizeNum(payload.loweractuallessld)
+          : sanitizeNum(payload.loweractual),
+      pvcPerSet: sanitizeNum(payload.pvcpersetc1),
+      show: 'C1' in scenarioAmounts && sanitizeNum(payload.loweractual) !== null,
+    },
+    {
+      code: 'D1',
+      gross: sanitizeNum(payload.lowercontractual),
+      ld: 0,
+      net:
+        rateApplied.includes('further') && sanitizeNum(payload.lowercontractuallessld) !== null
+          ? sanitizeNum(payload.lowercontractuallessld)
+          : sanitizeNum(payload.lowercontractual),
+      pvcPerSet: sanitizeNum(payload.pvcpersetd1),
+      show: b2Needed && 'D1' in scenarioAmounts && sanitizeNum(payload.lowercontractual) !== null,
+    },
+  ];
+
+  const active = rawCandidates.filter((c) => c.show && c.net !== null);
+  const nets = active.map((c) => c.net as number);
+  const maxNet = nets.length ? Math.max(...nets) : 1;
+  const minNet = nets.length ? Math.min(...nets) : 0;
+  const fairPrice = sanitizeNum(payload.fairprice) ?? minNet;
+  const savingsVsHighest = Math.max(0, maxNet - fairPrice);
+
+  const rows: ComparisonRow[] = active.map((c) => {
+    const netVal = c.net as number;
+    const grossVal = c.gross ?? netVal;
+    const barPct = maxNet > 0 ? Math.max(12, Math.min(100, Math.round((netVal / maxNet) * 100))) : 100;
+    return {
+      code: c.code,
+      label: SC_MAP[c.code] || c.code,
+      subtitle: SC_SUBTITLE[c.code] || '',
+      gross: grossVal,
+      ld: c.ld,
+      net: netVal,
+      pvcPerSet: c.pvcPerSet,
+      pvcPercent: pctMap.has(c.code) ? pctMap.get(c.code)! : null,
+      isSelected: c.code === selectedScenario,
+      isLowest: Math.abs(netVal - minNet) < 0.01,
+      varianceFromFair: Math.max(0, netVal - fairPrice),
+      barPct,
+    };
+  });
+
+  return {
+    rows,
+    fairPrice,
+    maxNet,
+    minNet,
+    savingsVsHighest,
+    selectedLabel: SC_MAP[selectedScenario] || selectedScenario,
+  };
 }
 
 // ── Single PVC Calculator ─────────────────────────────────────────────────
@@ -88,7 +212,7 @@ pvcRouter.post('/calculate', requireLogin, (req, res) => {
   if (idxMap.size === 0) {
     flashMessage(
       req,
-      'Indices not configured for this item. Please add them via Admin → Item Indices.',
+      'Indices not configured for this item. Please add them via Item Indices.',
       'danger'
     );
     res.redirect('/pvc/calculator');
@@ -130,7 +254,11 @@ pvcRouter.post('/calculate', requireLogin, (req, res) => {
   try {
     resultRow = calculateForItem(item, data, idxMap, weights);
   } catch (err) {
-    flashMessage(req, err instanceof Error ? err.message : 'Calculation failed. Please check your inputs and index data.', 'danger');
+    flashMessage(
+      req,
+      err instanceof Error ? err.message : 'Calculation failed. Please check your inputs and index data.',
+      'danger'
+    );
     res.redirect('/pvc/calculator');
     return;
   }
@@ -170,9 +298,10 @@ pvcRouter.post('/calculate', requireLogin, (req, res) => {
   const igbtVendorDetailsJson = JSON.stringify(payload.igbtvendordetails);
 
   const lastCalcCookie = req.cookies?.last_calc_id;
-  let calc = lastCalcCookie && /^\d+$/.test(String(lastCalcCookie))
-    ? store.getPVCResultById(parseInt(String(lastCalcCookie), 10))
-    : undefined;
+  let calc =
+    lastCalcCookie && /^\d+$/.test(String(lastCalcCookie))
+      ? store.getPVCResultById(parseInt(String(lastCalcCookie), 10))
+      : undefined;
 
   if (calc && (calc.user_id !== currentUser.id || calc.item_id !== item.id)) {
     calc = undefined;
@@ -228,6 +357,8 @@ pvcRouter.post('/calculate', requireLogin, (req, res) => {
     savedId = created.id;
   }
 
+  const comparison = buildComparisonSummary(payload, data.rateapplied);
+
   const displayData = {
     ...data,
     pvcbasedate: formatDateDDMMYYYY(data.pvcbasedate),
@@ -254,6 +385,7 @@ pvcRouter.post('/calculate', requireLogin, (req, res) => {
     result: buildResultObj(payload),
     calcid: savedId,
     auto_summary: action === 'summary',
+    comparison,
   });
 });
 
@@ -287,8 +419,8 @@ pvcRouter.get('/calc/:calcid', requireLogin, (req, res) => {
     developmentaltender: false,
   };
 
-  let scenarioamounts = {};
-  let scenariodetails = [];
+  let scenarioamounts: Record<string, number | null> = {};
+  let scenariodetails: ScenarioDetail[] = [];
   let igbtvendordetails = [];
   try { scenarioamounts = JSON.parse(calc.scenarioamounts_json || '{}'); } catch { scenarioamounts = {}; }
   try { scenariodetails = JSON.parse(calc.scenariodetails_json || '[]'); } catch { scenariodetails = []; }
@@ -324,6 +456,8 @@ pvcRouter.get('/calc/:calcid', requireLogin, (req, res) => {
     developmentaltender: false,
   };
 
+  const comparison = buildComparisonSummary(payload, calc.rateapplied);
+
   res.render('result.html', {
     item: item ? item.name : '',
     itemobj: item || null,
@@ -331,6 +465,7 @@ pvcRouter.get('/calc/:calcid', requireLogin, (req, res) => {
     result: buildResultObj(payload),
     calcid: calc.id,
     auto_summary: false,
+    comparison,
   });
 });
 
@@ -462,7 +597,6 @@ pvcRouter.post('/bulk_calculate', requireLogin, upload.single('data_file'), (req
     return;
   }
 
-  // Normalize keys: lowercase and strip spaces
   const normalizedRows = rawRows.map((row) => {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(row)) {
@@ -627,120 +761,4 @@ pvcRouter.post('/bulk_calculate', requireLogin, upload.single('data_file'), (req
   res.setHeader('Content-Disposition', `attachment; filename="Bulk_PVC_Report_${safeName}_${dateStamp}.xlsx"`);
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.send(buf);
-});
-
-// ── IREPS Document Processing (R-Note & PO) ───────────────────────────────
-
-pvcRouter.get('/process_rnote/:rnote_no', requireLogin, async (req, res) => {
-  let rnoteNo = String(req.params.rnote_no || '').trim();
-  if (!/^\d+$/.test(rnoteNo)) {
-    flashMessage(req, 'Invalid R-Note Number format. It should contain only digits.', 'danger');
-    res.redirect('/');
-    return;
-  }
-  if (rnoteNo.length < 10) rnoteNo = rnoteNo.padStart(10, '0');
-
-  const currentYear = new Date().getFullYear();
-  const years: number[] = [];
-  if (rnoteNo.length >= 4 && (rnoteNo.startsWith('42') || rnoteNo.startsWith('04'))) {
-    const derived = 2000 + parseInt(rnoteNo.slice(2, 4), 10);
-    years.push(derived, derived - 1, derived + 1);
-  }
-  for (let y = currentYear; y >= currentYear - 4; y--) {
-    if (!years.includes(y)) years.push(y);
-  }
-
-  const patterns = [
-    (y: number, r: string) => `https://www.ireps.gov.in/ireps/etender/pdfdocs/MMIS/RN/${y}/21/${r}.pdf`,
-    (y: number, r: string) => `https://www.ireps.gov.in/ireps/etender/pdfdocs/MMIS/RNOTE/${y}/21/${r}.pdf`,
-  ];
-
-  let foundPdf: Buffer | null = null;
-  let foundUrl = '';
-  for (const y of years.slice(0, 3)) {
-    for (const mk of patterns) {
-      const url = mk(y, rnoteNo);
-      try {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 5000);
-        const resp = await fetch(url, {
-          signal: ctrl.signal,
-          headers: { 'User-Agent': 'Mozilla/5.0' },
-        });
-        clearTimeout(timer);
-        if (resp.ok && (resp.headers.get('content-type') || '').includes('pdf')) {
-          foundPdf = Buffer.from(await resp.arrayBuffer());
-          foundUrl = url;
-          break;
-        }
-      } catch {
-        // continue trying next candidate
-      }
-    }
-    if (foundPdf) break;
-  }
-
-  if (!foundPdf) {
-    flashMessage(
-      req,
-      `R-Note '${rnoteNo}' could not be fetched from IREPS (not found or IREPS server unreachable from cloud runtime).`,
-      'warning'
-    );
-    res.redirect('/');
-    return;
-  }
-
-  res.setHeader('Content-Disposition', `attachment; filename="${rnoteNo}.pdf"`);
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('X-Source-URL', foundUrl);
-  res.send(foundPdf);
-});
-
-pvcRouter.get('/process_po/:po_no', requireLogin, async (req, res) => {
-  const poNo = String(req.params.po_no || '').trim();
-  if (!/^\d+$/.test(poNo)) {
-    flashMessage(req, 'Invalid PO Number format. It should contain only digits.', 'danger');
-    res.redirect('/');
-    return;
-  }
-
-  let baseYear = new Date().getFullYear();
-  if (poNo.length >= 4) {
-    const parsed = 2000 + parseInt(poNo.slice(2, 4), 10);
-    if (parsed >= 2015 && parsed <= 2030) baseYear = parsed;
-  }
-
-  let foundPdf: Buffer | null = null;
-  for (let year = baseYear; year <= Math.min(baseYear + 2, 2026); year++) {
-    const url = `https://ireps.gov.in/ireps/etender/pdfdocs/MMIS/PO/${year}/21/${poNo}.pdf`;
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 5000);
-      const resp = await fetch(url, {
-        signal: ctrl.signal,
-        headers: { 'User-Agent': 'Mozilla/5.0' },
-      });
-      clearTimeout(timer);
-      if (resp.ok && (resp.headers.get('content-type') || '').includes('pdf')) {
-        foundPdf = Buffer.from(await resp.arrayBuffer());
-        break;
-      }
-    } catch {
-      // continue
-    }
-  }
-
-  if (!foundPdf) {
-    flashMessage(
-      req,
-      `Purchase Order '${poNo}' could not be fetched from IREPS (not found or IREPS server unreachable from cloud runtime).`,
-      'warning'
-    );
-    res.redirect('/');
-    return;
-  }
-
-  res.setHeader('Content-Disposition', `attachment; filename="${poNo}.pdf"`);
-  res.setHeader('Content-Type', 'application/pdf');
-  res.send(foundPdf);
 });

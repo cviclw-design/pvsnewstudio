@@ -1,59 +1,32 @@
 {% extends "base.html" %}
-{% block title %}Bulk PVC Calculator{% endblock %}
+{% block title %}Bulk PVC Calculator — PVC Calculation Studio{% endblock %}
 
 {% block content %}
-<div class="alert alert-primary mt-2 d-flex justify-content-between align-items-center">
+<div class="pvc-page-header">
   <div>
-    <h4 class="mb-1"><i class="bi bi-upload me-2"></i>Bulk PVC Calculation</h4>
-    <div class="small">Upload an Excel file to calculate PVC for multiple records at once.</div>
-  </div>
-  <div>
-    <button type="button" class="btn btn-outline-secondary btn-sm fw-bold me-2" onclick="window.history.back()"><i class="bi bi-arrow-left"></i> Back</button>
-    <a href="{{ url_for('main.index') }}" class="btn btn-outline-primary btn-sm fw-bold"><i class="bi bi-grid-fill me-1"></i> Dashboard</a>
+    <div class="pvc-section-label">Batch Workbook Processor</div>
+    <h1 class="pvc-page-title">Bulk PVC Calculation</h1>
   </div>
 </div>
 
-<style>
-  body {
-    background-color: #e2e8f0 !important;
-  }
-  .card {
-    background-color: #f1f5f9 !important;
-    border: 1px solid #cbd5e1;
-  }
-  .form-control, .form-select {
-    background-color: #ffffff !important;
-  }
-  .form-label {
-    font-weight: 600;
-  }
-</style>
-
-<div class="card shadow-sm">
-  <div class="card-header py-3" style="background-color: #e2e8f0;">
-    <h6 class="mb-0 text-primary fw-bold">Upload Details</h6>
+<div class="card">
+  <div class="card-header">
+    <h6 class="fw-bold mb-0"><i class="bi bi-file-earmark-spreadsheet me-2 text-primary"></i>Excel Workbook Upload</h6>
   </div>
   <div class="card-body">
     <form method="post" action="{{ url_for('pvc.bulk_calculate') }}" enctype="multipart/form-data">
-
       <div class="row g-3">
-
-        <!-- PVC Data File Upload -->
-        <div class="col-md-12">
-          <label for="data_file" class="form-label">Upload PVC Input Data</label>
+        <div class="col-12">
+          <label for="data_file" class="form-label">Select Input Excel File (.xlsx / .xls)</label>
           <input class="form-control" type="file" id="data_file" name="data_file" accept=".xlsx, .xls" required>
-          <div class="form-text">
-            Upload the Excel file for calculation. Each row must contain a `tenderno` column. The system will use it to determine the correct item and formula for each record.
-          </div>
         </div>
       </div>
 
-      <div class="text-center mt-4">
-        <button type="submit" class="btn btn-success px-5">
-          <i class="bi bi-gear-wide-connected"></i> Process Files and Download Report
+      <div class="d-flex justify-content-end mt-4 pt-3 border-top">
+        <button type="submit" class="btn btn-primary px-4">
+          <i class="bi bi-play-circle me-1"></i>Process Workbook &amp; Download Report
         </button>
       </div>
-
     </form>
   </div>
 </div>

@@ -1,57 +1,64 @@
 {% extends "base.html" %}
-{% block title %}Vendors – {{ tender.tender_no }}{% endblock %}
+{% block title %}Vendors — {{ tender.tender_no }} — PVC Calculation Studio{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="pvc-page-header">
   <div>
-    <h3 class="mb-1">Vendors – {{ tender.tender_no }}</h3>
-    <p class="text-muted mb-0">Item: {{ tender.item.name if tender.item else '-' }}</p>
+    <div class="pvc-section-label">Tender Vendors</div>
+    <h1 class="pvc-page-title">Vendors — {{ tender.tender_no }}</h1>
+    <p class="pvc-page-sub">
+      Item: <strong class="text-dark">{{ tender.item.name if tender.item else '—' }}</strong>
+      {% if tender.basicrate != null %} &middot; Basic Rate: <span class="mono-num text-dark">₹{{ pyfmt("{:,.2f}", tender.basicrate | float(0)) }}</span>{% endif %}
+    </p>
   </div>
-  <div>
-    <button type="button" class="btn btn-outline-secondary me-2" onclick="window.history.back()"><i class="bi bi-arrow-left"></i> Back</button>
-    <a href="{{ url_for('admin.tenders_list') }}" class="btn btn-outline-secondary me-2">
-      Back to Tenders
+  <div class="d-flex flex-wrap gap-2">
+    <a href="{{ url_for('admin.tenders_list') }}" class="btn btn-outline-secondary">
+      <i class="bi bi-arrow-left me-1"></i>Back to Tenders
     </a>
     <a href="{{ url_for('admin.tender_vendors_new', tenderid=tender.id) }}" class="btn btn-primary">
-      <i class="bi bi-plus-circle"></i> Add Vendor
+      <i class="bi bi-plus-circle me-1"></i>Add Vendor
     </a>
   </div>
 </div>
 
 {% if rows %}
-<div class="card shadow-sm">
+<div class="card">
   <div class="card-body p-0">
     <div class="table-responsive">
-      <table class="table table-sm table-bordered table-hover mb-0 align-middle">
-        <thead class="table-light">
+      <table class="table table-hover mb-0 align-middle">
+        <thead>
           <tr>
-            <th>ID</th>
+            <th style="width: 70px;">ID</th>
             <th>Vendor Name</th>
             <th>PO No</th>
-            <th>Original CIF</th>
-            <th>Freight Unit</th>
-            <th>Currency</th>
-            <th>Actions</th>
+            <th class="text-end">Original CIF</th>
+            <th class="text-end">Freight / Unit (₹)</th>
+            <th class="text-center">Currency</th>
+            <th class="text-end" style="width: 170px;">Actions</th>
           </tr>
         </thead>
         <tbody>
           {% for v in rows %}
           <tr>
-            <td>{{ v.id }}</td>
-            <td>{{ v.vendor_name }}</td>
-            <td>{{ v.po_no or '-' }}</td>
-            <td>{{ v.cif or 0 }}</td>
-            <td>{{ v.freightrateperunit or 0 }}</td>
-            <td>{{ v.currency }}</td>
-            <td>
-            <a href="{{ url_for('admin.tender_vendors_edit', tenderid=tender.id, rowid=v.id) }}"
-               class="btn btn-sm btn-warning me-1">Edit</a>
-            <form method="post"
-                  action="{{ url_for('admin.tender_vendors_delete', tenderid=tender.id, rowid=v.id) }}"
-                  class="d-inline"
-                  onsubmit="return confirm('Delete vendor {{ v.vendor_name }}?')">
-              <button class="btn btn-sm btn-danger">Delete</button>
-            </form>
+            <td class="mono-num text-muted">#{{ v.id }}</td>
+            <td class="fw-semibold text-dark">{{ v.vendor_name }}</td>
+            <td class="mono-num small">{{ v.po_no or '—' }}</td>
+            <td class="text-end mono-num">{{ pyfmt("{:,.2f}", v.cif | float(0)) }}</td>
+            <td class="text-end mono-num">₹{{ pyfmt("{:,.2f}", v.freightrateperunit | float(0)) }}</td>
+            <td class="text-center mono-num fw-semibold text-primary">{{ v.currency }}</td>
+            <td class="text-end text-nowrap">
+              <a href="{{ url_for('admin.tender_vendors_edit', tenderid=tender.id, rowid=v.id) }}"
+                 class="btn btn-sm btn-outline-secondary me-1">
+                <i class="bi bi-pencil"></i> Edit
+              </a>
+              <form method="post"
+                    action="{{ url_for('admin.tender_vendors_delete', tenderid=tender.id, rowid=v.id) }}"
+                    class="d-inline"
+                    onsubmit="return requestDeleteConfirm(this, 'Delete vendor {{ v.vendor_name | replace("'", "\\'") }} from tender {{ tender.tender_no | replace("'", "\\'") }}?')">
+                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete vendor">
+                  <i class="bi bi-trash"></i>
+                </button>
+              </form>
             </td>
           </tr>
           {% endfor %}
@@ -61,6 +68,14 @@
   </div>
 </div>
 {% else %}
-<div class="alert alert-info">No vendors configured for this tender.</div>
+<div class="card">
+  <div class="card-body text-center py-5">
+    <i class="bi bi-building fs-2 text-muted d-block mb-2"></i>
+    <h6 class="fw-bold mb-3">No vendors configured for this tender</h6>
+    <a href="{{ url_for('admin.tender_vendors_new', tenderid=tender.id) }}" class="btn btn-primary btn-sm">
+      <i class="bi bi-plus-circle me-1"></i>Add Vendor
+    </a>
+  </div>
+</div>
 {% endif %}
 {% endblock %}

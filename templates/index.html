@@ -1,75 +1,53 @@
 {% extends "base.html" %}
-{% block title %}PVC Calculator{% endblock %}
+{% block title %}PVC Calculator — PVC Calculation Studio{% endblock %}
 
 {% block content %}
-<div class="alert alert-primary mt-2 d-flex justify-content-between align-items-center">
+<div class="pvc-page-header">
   <div>
-    <h4 class="mb-1"><i class="bi bi-calculator me-2"></i>PVC Calculation</h4>
-    <div class="small">Fill the details below</div>
-  </div>
-  <div>
-    <button type="button" class="btn btn-outline-secondary btn-sm fw-bold me-2" onclick="window.history.back()"><i class="bi bi-arrow-left"></i> Back</button>
-    <a href="{{ url_for('main.index') }}" class="btn btn-outline-primary btn-sm fw-bold"><i class="bi bi-grid-fill me-1"></i> Dashboard</a>
+    <div class="pvc-section-label">Price Variation Engine</div>
+    <h1 class="pvc-page-title">PVC Calculation</h1>
   </div>
 </div>
 
 <style>
-  /* Distinct Page and Card Backgrounds to make White Textboxes pop */
-  body {
-    background-color: #e2e8f0 !important;
-  }
-  .card {
-    background-color: #f1f5f9 !important;
-    border: 1px solid #cbd5e1;
-  }
-  .form-control, .form-select {
-    background-color: #ffffff !important;
-    border: 1px solid #adb5bd;
-    box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);
-  }
-
-  /* Highly visible, interactive checkboxes */
+  /* Clean interactive checkboxes */
   .form-check-input {
-    width: 1.6em;
-    height: 1.6em;
+    width: 1.35em;
+    height: 1.35em;
     margin-top: 0.1em;
-    border: 2px solid #8e959b;
+    border: 1.5px solid #94a3b8;
     cursor: pointer;
-    transition: all 0.2s ease-in-out;
+    transition: all 0.15s ease;
   }
   .form-check-input:checked {
-    background-color: #fd7e14; /* Vibrant Orange */
-    border-color: #fd7e14;
-    transform: scale(1.1);
-  }
-  .form-check-input:focus {
-    box-shadow: 0 0 0 0.25rem rgba(253, 126, 20, 0.25);
+    background-color: #1d4ed8;
+    border-color: #1d4ed8;
   }
   .form-check-label {
     cursor: pointer;
-    padding-top: 0.2em;
+    padding-top: 0.12em;
     padding-left: 0.3em;
   }
   .form-check {
-    padding: 0.4rem 0.8rem 0.4rem 2.2rem;
+    padding: 0.45rem 0.85rem 0.45rem 2.15rem;
     border-radius: 8px;
-    background-color: #f8f9fa;
-    border: 1px solid #e9ecef;
-    transition: all 0.2s ease;
+    background-color: #f8fafc;
+    border: 1px solid #e2e8f0;
+    transition: all 0.15s ease;
     margin-bottom: 0.5rem;
   }
   .form-check:hover {
-    background-color: #e9ecef;
-    border-color: #ced4da;
+    background-color: #f1f5f9;
+    border-color: #cbd5e1;
   }
 </style>
 
 <form method="post" action="{{ url_for('pvc.calculate') }}">
 
   <!-- Basic details -->
-  <div class="card mb-3 shadow-sm">
-    <div class="card-header py-3" style="background-color: #e2e8f0;">
-      <h6 class="mb-0 text-primary fw-bold">Basic Details</h6>
+  <div class="card mb-3">
+    <div class="card-header">
+      <h6 class="mb-0 fw-bold"><i class="bi bi-sliders me-2 text-primary"></i>Basic Details</h6>
     </div>
     <div class="card-body">
       <div class="row g-3">
@@ -107,9 +85,6 @@
             </option>
             {% endfor %}
           </select>
-          <small class="text-muted">
-            For <code>IGBTPROPULSIONSYSTEM</code>.
-          </small>
         </div>
 
         <!-- Vendor (for IGBT items) -->
@@ -216,7 +191,6 @@
               </option>
               {% endfor %}
             </select>
-            <small class="text-muted">Select the subsequent tender to automatically apply its Base Rate, Base Date, Freight, and CIF for Lower Rate scenarios.</small>
           </div>
         </div>
       </div>
@@ -281,19 +255,13 @@
   </div><!-- /.card (Date Details) -->
 
   <!-- Submit -->
-  <div class="text-center mb-4">
-    <button type="button" class="btn btn-secondary px-4 me-2" onclick="window.history.back()">
-      <i class="bi bi-arrow-left"></i> Back
+  <div class="d-flex justify-content-end gap-2 mb-4">
+    <button type="submit" name="action" value="summary" class="btn btn-outline-secondary px-4">
+      <i class="bi bi-file-earmark-text me-1"></i>Print Summary
     </button>
-    <button type="submit" name="action" value="calculate" class="btn btn-primary px-4 me-2">
-      <i class="bi bi-calculator"></i> Calculate PVC
+    <button type="submit" name="action" value="calculate" class="btn btn-primary px-4">
+      <i class="bi bi-calculator me-1"></i>Calculate PVC
     </button>
-    <button type="submit" name="action" value="summary" class="btn btn-warning px-4 text-dark">
-      <i class="bi bi-file-earmark-text"></i> Print Summary
-    </button>
-    <a href="{{ url_for('pvc.bulk_calculator') }}" class="btn btn-success px-4">
-      <i class="bi bi-upload"></i> Bulk PVC Calculator
-    </a>
   </div>
 
 </form>

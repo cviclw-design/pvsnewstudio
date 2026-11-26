@@ -1,58 +1,275 @@
 {% extends "base.html" %}
-{% block title %}{{ 'Edit Item' if item else 'Add Item' }}{% endblock %}
+{% block title %}{{ 'Edit Item' if item else 'Add Item' }} — PVC Calculation Studio{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h3 class="mb-1">{{ 'Edit Item' if item else 'Add Item' }}</h3>
-  <a href="{{ url_for('admin.items_list') }}" class="btn btn-outline-secondary">Back to Items</a>
+<div class="pvc-page-header">
+  <div>
+    <h1 class="pvc-page-title">{{ 'Edit Item' if item else 'Add Item' }}</h1>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('admin.items_list') }}" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-arrow-left me-1"></i>Back
+    </a>
+  </div>
 </div>
 
-<form method="post">
-  <div class="card shadow-sm">
+{% set cur_formula = (item.pvc_formula_code if item else 'IEEMA_WEIGHTED') %}
+{% set preset_formulas = ['IEEMA_WEIGHTED', 'RATIO_MULTIPLIER', 'IGBTPROPULSIONSYSTEM', 'SIMPLE_SINGLE_INDEX', 'CUSTOM_EXPRESSION', 'POWERTRFIEEMA', 'TRACTIONMOTOR'] %}
+
+<form id="itemConfigForm" method="post" action="{{ url_for('admin.items_edit', itemid=item.id) if item else url_for('admin.items_new') }}">
+  <div class="card mb-4">
+    <div class="card-header">
+      <h6 class="fw-bold mb-0">Item &amp; Formula Configuration</h6>
+    </div>
     <div class="card-body">
-      <div class="mb-3">
-        <label class="form-label fw-semibold">Name</label>
-        <input type="text" name="name" class="form-control" required
-               value="{{ item.name if item else '' }}">
-      </div>
+      <div class="row g-3">
+        <div class="col-md-5">
+          <label class="form-label" for="itemName">Item Name <span class="text-danger">*</span></label>
+          <input id="itemName" type="text" name="name" class="form-control" required
+                 placeholder="e.g. Steel Wheel Set / Main Transformer"
+                 value="{{ item.name if item else '' }}">
+        </div>
 
-      <div class="mb-3">
-        <label class="form-label fw-semibold">Code</label>
-        <input type="text" name="code" class="form-control"
-               value="{{ item.code if item else '' }}">
-      </div>
+        <div class="col-md-3">
+          <label class="form-label" for="itemCode">Item Code</label>
+          <input id="itemCode" type="text" name="code" class="form-control mono-num"
+                 placeholder="e.g. 29180010"
+                 value="{{ item.code if item and item.code else '' }}">
+        </div>
 
-      <div class="mb-3">
-        <label class="form-label fw-semibold">PVC Formula Code</label>
-        <input type="text" name="pvcformulacode" class="form-control" required
-               value="{{ item.pvc_formula_code if item else '' }}">
-        <small class="text-muted">Example: POWERTRFIEEMA, IGBTPROPULSIONSYSTEM.</small>
-      </div>
+        <div class="col-md-4">
+          <label class="form-label" for="itemFormula">PVC Formula <span class="text-danger">*</span></label>
+          <select id="itemFormula" name="pvcformulacode" class="form-select" required>
+            <option value="IEEMA_WEIGHTED" {% if cur_formula in ['IEEMA_WEIGHTED', 'IEEMA_GENERAL', 'GENERIC'] %}selected{% endif %}>Weighted Variation — Σ Wᵢ(Iᵢ − I₀ᵢ)/I₀ᵢ</option>
+            <option value="RATIO_MULTIPLIER" {% if cur_formula == 'RATIO_MULTIPLIER' %}selected{% endif %}>Price Ratio Multiplier — F + Σ Wᵢ(Iᵢ / I₀ᵢ)</option>
+            <option value="SIMPLE_SINGLE_INDEX" {% if cur_formula == 'SIMPLE_SINGLE_INDEX' %}selected{% endif %}>Single-Index Variation — (100 − F)(I − I₀)/I₀</option>
+            <option value="IGBTPROPULSIONSYSTEM" {% if cur_formula == 'IGBTPROPULSIONSYSTEM' %}selected{% endif %}>IGBT Multi-Vendor (P1 Indigenous + P2 CIF/ER)</option>
+            <option value="CUSTOM_EXPRESSION" {% if cur_formula == 'CUSTOM_EXPRESSION' %}selected{% endif %}>Custom Formula Expression</option>
+            {% if cur_formula == 'POWERTRFIEEMA' %}
+            <option value="POWERTRFIEEMA" selected>POWERTRFIEEMA (Weighted Variation)</option>
+            {% endif %}
+            {% if cur_formula == 'TRACTIONMOTOR' %}
+            <option value="TRACTIONMOTOR" selected>TRACTIONMOTOR (Weighted Variation)</option>
+            {% endif %}
+            {% if cur_formula and (cur_formula not in preset_formulas) and (cur_formula not in ['IEEMA_GENERAL', 'GENERIC']) %}
+            <option value="{{ cur_formula }}" selected>{{ cur_formula }}</option>
+            {% endif %}
+          </select>
+        </div>
 
-      <div class="mb-3">
-        <label class="form-label fw-semibold">Weights JSON</label>
-        <textarea name="weightsjson" class="form-control" rows="3">{{ item.weights_json if item else '{}' }}</textarea>
-        <small class="text-muted">Example: {"C":40,"AL":20,"MS":10}</small>
-      </div>
+        <div class="col-md-2">
+          <label class="form-label" for="fixedWeight">Fixed Portion (%)</label>
+          <input id="fixedWeight" type="number" step="any" min="0" max="100" name="fixed_weight" class="form-control mono-num"
+                 value="{{ item.fixed_weight if item and item.fixed_weight != null else 15 }}">
+        </div>
 
-      <div class="mb-3">
-        <label class="form-label fw-semibold">Extra Fields JSON</label>
-        <textarea name="extrafieldsjson" class="form-control" rows="3">{{ item.extra_fields_json if item else '[]' }}</textarea>
-        <small class="text-muted">Array of objects: [{"name":"field1","label":"Field 1","type":"number"}]</small>
-      </div>
+        <div class="col-md-2">
+          <label class="form-label" for="lagMonths">Lag Months</label>
+          <input id="lagMonths" type="number" step="1" min="0" max="12" name="lag_months" class="form-control mono-num"
+                 value="{{ item.lag_months if item and item.lag_months != null else 1 }}">
+        </div>
 
-      <div class="mb-3">
-        <label class="form-label fw-semibold">Description</label>
-        <textarea name="description" class="form-control" rows="2">{{ item.description if item else '' }}</textarea>
-      </div>
+        <div class="col-md-2">
+          <label class="form-label" for="baseLagMonths">Base Lag (Mo)</label>
+          <input id="baseLagMonths" type="number" step="1" min="0" max="12" name="base_lag_months" class="form-control mono-num"
+                 value="{{ item.base_lag_months if item and item.base_lag_months != null else 0 }}">
+        </div>
 
-      <div class="text-end">
-        <button type="button" class="btn btn-outline-secondary me-2" onclick="window.history.back()">Back</button>
-        <button type="submit" class="btn btn-primary">
-          {{ 'Update' if item else 'Create' }} Item
-        </button>
+        <div class="col-md-6">
+          <label class="form-label" for="indexSource">Primary Index Source</label>
+          <input id="indexSource" type="text" name="index_source" class="form-control"
+                 list="indexSourcePresets"
+                 placeholder="e.g. Office of the Economic Adviser, Govt. of India (WPI)"
+                 value="{{ item.index_source if item and item.index_source else 'IEEMA' }}">
+          <datalist id="indexSourcePresets">
+            <option value="IEEMA">
+            <option value="Office of the Economic Adviser, Govt. of India (WPI)">
+            <option value="Times of India Intelligence Group">
+            <option value="Reserve Bank of India (RBI)">
+            <option value="Labour Bureau, Govt. of India (CPI-IW)">
+            <option value="LME / Metal Bulletin">
+            <option value="SAIL / JPC Steel Price">
+          </datalist>
+        </div>
+
+        <div class="col-12" id="customFormulaGroup" style="display: none;">
+          <label class="form-label" for="customFormula">Custom Formula Expression (PVC %)</label>
+          <input id="customFormula" type="text" name="custom_formula" class="form-control mono-num"
+                 placeholder="e.g. 40*(C - C0)/C0 + 30*(FE - FE0)/FE0 + 15*(W - W0)/W0"
+                 value="{{ item.custom_formula if item and item.custom_formula else '' }}">
+        </div>
+
+        <div class="col-12">
+          <label class="form-label" for="itemDesc">Description</label>
+          <input id="itemDesc" type="text" name="description" class="form-control"
+                 value="{{ item.description if item and item.description else '' }}">
+        </div>
       </div>
     </div>
   </div>
+
+  <!-- Component Weightages Builder -->
+  <div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <h6 class="fw-bold mb-0">Component Weightages, Lag &amp; Index Sources</h6>
+      <div class="d-flex align-items-center gap-3">
+        <span class="mono-num small fw-semibold" id="weightTotalLabel">Total: 100.00%</span>
+        <button type="button" class="btn btn-sm btn-outline-primary" id="addComponentBtn">
+          <i class="bi bi-plus-lg me-1"></i>Add Component
+        </button>
+      </div>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table mb-0 align-middle">
+          <thead>
+            <tr>
+              <th style="width: 13%;">Key</th>
+              <th style="width: 24%;">Component Name</th>
+              <th style="width: 14%;">Weight (%)</th>
+              <th style="width: 12%;">Lag (Mo)</th>
+              <th style="width: 31%;">Index Source</th>
+              <th style="width: 6%;" class="text-end"></th>
+            </tr>
+          </thead>
+          <tbody id="componentsTbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <input type="hidden" name="componentsjson" id="componentsJsonInput" value="{{ item.components_json if item and item.components_json else '' }}">
+  <input type="hidden" name="weightsjson" id="weightsJsonInput" value="{{ item.weights_json if item else '' }}">
+  <input type="hidden" name="extrafieldsjson" value="{{ item.extra_fields_json if item else '[]' }}">
+
+  <div class="d-flex justify-content-end gap-2">
+    <a href="{{ url_for('admin.items_list') }}" class="btn btn-outline-secondary">Cancel</a>
+    <button type="submit" class="btn btn-primary px-4">
+      <i class="bi bi-check2-circle me-1"></i>{{ 'Update Item' if item else 'Save Item' }}
+    </button>
+  </div>
 </form>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  var tbody = document.getElementById('componentsTbody');
+  var addBtn = document.getElementById('addComponentBtn');
+  var fixedEl = document.getElementById('fixedWeight');
+  var totalEl = document.getElementById('weightTotalLabel');
+  var formulaEl = document.getElementById('itemFormula');
+  var customGroup = document.getElementById('customFormulaGroup');
+  var primarySourceEl = document.getElementById('indexSource');
+  var defaultLagEl = document.getElementById('lagMonths');
+  var compInput = document.getElementById('componentsJsonInput');
+  var weightsInput = document.getElementById('weightsJsonInput');
+  var form = document.getElementById('itemConfigForm');
+
+  function esc(str) {
+    return String(str == null ? '' : str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function toggleCustomFormula() {
+    if (!formulaEl || !customGroup) return;
+    customGroup.style.display = formulaEl.value === 'CUSTOM_EXPRESSION' ? 'block' : 'none';
+  }
+
+  function updateTotalAndSync() {
+    var fixedVal = parseFloat(fixedEl.value) || 0;
+    var sum = fixedVal;
+    var comps = [];
+    var weightsObj = { FIXED: fixedVal };
+
+    tbody.querySelectorAll('tr.comp-row').forEach(function(tr) {
+      var key = tr.querySelector('.c-key').value.trim();
+      var label = tr.querySelector('.c-label').value.trim();
+      var wRaw = tr.querySelector('.c-weight').value.trim();
+      var lagRaw = tr.querySelector('.c-lag').value.trim();
+      var src = tr.querySelector('.c-source').value.trim();
+      var w = parseFloat(wRaw) || 0;
+      sum += w;
+      if (key) {
+        comps.push({
+          key: key,
+          label: label || key,
+          weight: w,
+          lag_months: lagRaw !== '' ? parseInt(lagRaw, 10) : null,
+          source: src || null
+        });
+        weightsObj[key] = w;
+      }
+    });
+
+    totalEl.textContent = 'Total: ' + sum.toFixed(2) + '%';
+    totalEl.className = 'mono-num small fw-semibold ' + (Math.abs(sum - 100) < 0.01 ? 'text-success' : 'text-warning');
+    compInput.value = JSON.stringify(comps);
+    weightsInput.value = JSON.stringify(weightsObj);
+  }
+
+  function addRow(comp) {
+    var tr = document.createElement('tr');
+    tr.className = 'comp-row';
+    var lagVal = comp.lag_months !== undefined && comp.lag_months !== null && comp.lag_months !== '' ? comp.lag_months : '';
+    tr.innerHTML =
+      '<td><input type="text" class="form-control form-control-sm mono-num c-key" placeholder="C" value="' + esc(comp.key || '') + '"></td>' +
+      '<td><input type="text" class="form-control form-control-sm c-label" placeholder="Copper" value="' + esc(comp.label || '') + '"></td>' +
+      '<td><input type="number" step="any" class="form-control form-control-sm mono-num c-weight" placeholder="25" value="' + esc(comp.weight !== undefined ? comp.weight : '') + '"></td>' +
+      '<td><input type="number" step="1" min="0" max="12" class="form-control form-control-sm mono-num c-lag" placeholder="' + esc(defaultLagEl.value || '1') + '" value="' + esc(lagVal) + '"></td>' +
+      '<td><input type="text" class="form-control form-control-sm c-source" list="indexSourcePresets" placeholder="Index source" value="' + esc(comp.source || primarySourceEl.value || '') + '"></td>' +
+      '<td class="text-end"><button type="button" class="btn btn-sm btn-outline-danger c-del" title="Remove"><i class="bi bi-x-lg"></i></button></td>';
+
+    tr.querySelector('.c-del').addEventListener('click', function() {
+      tr.remove();
+      updateTotalAndSync();
+    });
+    tr.querySelectorAll('input').forEach(function(inp) {
+      inp.addEventListener('input', updateTotalAndSync);
+    });
+    tbody.appendChild(tr);
+  }
+
+  // Hydrate initial rows from components_json or weights_json
+  var initialComps = [];
+  try {
+    if (compInput.value) {
+      var parsedC = JSON.parse(compInput.value);
+      if (Array.isArray(parsedC) && parsedC.length) initialComps = parsedC;
+    }
+  } catch (e) {}
+
+  if (!initialComps.length && weightsInput.value) {
+    try {
+      var parsedW = JSON.parse(weightsInput.value);
+      Object.entries(parsedW).forEach(function(pair) {
+        if (pair[0].toUpperCase() === 'FIXED') {
+          fixedEl.value = pair[1];
+        } else {
+          initialComps.push({ key: pair[0], label: pair[0], weight: pair[1], lag_months: null, source: primarySourceEl.value });
+        }
+      });
+    } catch (e) {}
+  }
+
+  if (!initialComps.length) {
+    initialComps = [
+      { key: 'C', label: 'Copper', weight: 30, lag_months: '', source: 'IEEMA' },
+      { key: 'FE', label: 'Iron & Steel', weight: 35, lag_months: '', source: 'Office of the Economic Adviser, Govt. of India (WPI)' },
+      { key: 'W', label: 'Labour / Wage', weight: 20, lag_months: '', source: 'Labour Bureau, Govt. of India (CPI-IW)' }
+    ];
+  }
+
+  initialComps.forEach(addRow);
+  toggleCustomFormula();
+  updateTotalAndSync();
+
+  addBtn.addEventListener('click', function() {
+    addRow({ key: '', label: '', weight: '', lag_months: '', source: primarySourceEl.value });
+    updateTotalAndSync();
+  });
+  fixedEl.addEventListener('input', updateTotalAndSync);
+  formulaEl.addEventListener('change', toggleCustomFormula);
+  form.addEventListener('submit', updateTotalAndSync);
+});
+</script>
 {% endblock %}

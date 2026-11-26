@@ -1,5 +1,6 @@
 import { store } from './store.js';
 import {
+  ComponentConfig,
   IGBTIndexDetail,
   IGBTVendorSummary,
   ItemRecord,
@@ -163,25 +164,243 @@ function ieemaRow(
   return { ym: target, key, values };
 }
 
+export function parseItemComponents(
+  item: ItemRecord | null | undefined,
+  weights: Record<string, number>
+): ComponentConfig[] {
+  if (item?.components_json) {
+    try {
+      const arr = JSON.parse(item.components_json);
+      if (Array.isArray(arr) && arr.length > 0) {
+        const cleaned: ComponentConfig[] = [];
+        for (const c of arr) {
+          const key = String(c?.key || '').trim();
+          if (!key || key.toUpperCase() === 'FIXED') continue;
+          const weight = Number(c?.weight ?? 0);
+          const lagVal =
+            c?.lag_months !== undefined && c?.lag_months !== null && c?.lag_months !== ''
+              ? Math.max(0, Math.min(12, Math.floor(Number(c.lag_months))))
+              : null;
+          cleaned.push({
+            key,
+            label: String(c?.label || key).trim(),
+            weight: Number.isFinite(weight) ? weight : 0,
+            lag_months: lagVal !== null && Number.isFinite(lagVal) ? lagVal : null,
+            source: c?.source ? String(c.source).trim() : null,
+          });
+        }
+        if (cleaned.length > 0) return cleaned;
+      }
+    } catch {
+      // fallback to weights
+    }
+  }
+  const out: ComponentConfig[] = [];
+  for (const [k, w] of Object.entries(weights || {})) {
+    if (k.toUpperCase() === 'FIXED') continue;
+    const numW = Number(w);
+    out.push({
+      key: k,
+      label: k,
+      weight: Number.isFinite(numW) ? numW : 0,
+      lag_months: null,
+      source: item?.index_source || null,
+    });
+  }
+  return out;
+}
+
+export function getItemDefaultLag(item: ItemRecord | null | undefined, formulaCode = ''): number {
+  if (item && item.lag_months !== undefined && item.lag_months !== null && Number.isFinite(Number(item.lag_months))) {
+    return Math.max(0, Math.min(12, Math.floor(Number(item.lag_months))));
+  }
+  const code = (formulaCode || item?.pvc_formula_code || '').replace(/\s+/g, '').toUpperCase();
+  return code === 'TRACTIONMOTOR' ? 2 : 1;
+}
+
+export function getItemBaseLag(item: ItemRecord | null | undefined): number {
+  if (
+    item &&
+    item.base_lag_months !== undefined &&
+    item.base_lag_months !== null &&
+    Number.isFinite(Number(item.base_lag_months))
+  ) {
+    return Math.max(0, Math.min(12, Math.floor(Number(item.base_lag_months))));
+  }
+  return 0;
+}
+
+export function getItemFixedWeight(item: ItemRecord | null | undefined, weights: Record<string, number>): number {
+  if (item && item.fixed_weight !== undefined && item.fixed_weight !== null && Number.isFinite(Number(item.fixed_weight))) {
+    return Number(item.fixed_weight);
+  }
+  if (weights && weights.FIXED !== undefined && Number.isFinite(Number(weights.FIXED))) {
+    return Number(weights.FIXED);
+  }
+  const varSum = Object.entries(weights || {})
+    .filter(([k]) => k.toUpperCase() !== 'FIXED')
+    .reduce((acc, [, v]) => acc + (Number.isFinite(Number(v)) ? Number(v) : 0), 0);
+  return Math.max(0, safeRound(100 - varSum, 4) ?? 0);
+}
+
+/**
+ * Safe recursive-descent arithmetic evaluator (no eval/Function).
+ * Supports +, -, *, /, parentheses, unary +/-, numeric literals, and identifiers.
+ */
+export function evaluateMathExpression(expr: string, vars: Record<string, number>): number {
+  const tokens: Array<{ type: 'num' | 'id' | 'op' | 'lp' | 'rp'; value: string }> = [];
+  let i = 0;
+  const s = String(expr || '').trim();
+  if (!s) throw new Error('Custom formula expression is empty.');
+
+  while (i < s.length) {
+    const ch = s[i];
+    if (/\s/.test(ch)) {
+      i++;
+      continue;
+    }
+    if (/[0-9.]/.test(ch)) {
+      let start = i;
+      let dots = 0;
+      while (i < s.length && /[0-9.]/.test(s[i])) {
+        if (s[i] === '.') dots++;
+        i++;
+      }
+      if (dots > 1) throw new Error(`Invalid number in formula near "${s.slice(start, i)}".`);
+      tokens.push({ type: 'num', value: s.slice(start, i) });
+      continue;
+    }
+    if (/[A-Za-z_]/.test(ch)) {
+      let start = i;
+      while (i < s.length && /[A-Za-z0-9_]/.test(s[i])) i++;
+      tokens.push({ type: 'id', value: s.slice(start, i) });
+      continue;
+    }
+    if (ch === '+' || ch === '-' || ch === '*' || ch === '/') {
+      tokens.push({ type: 'op', value: ch });
+      i++;
+      continue;
+    }
+    if (ch === '(') {
+      tokens.push({ type: 'lp', value: ch });
+      i++;
+      continue;
+    }
+    if (ch === ')') {
+      tokens.push({ type: 'rp', value: ch });
+      i++;
+      continue;
+    }
+    throw new Error(`Unsupported character "${ch}" in custom formula.`);
+  }
+
+  let pos = 0;
+  const peek = () => tokens[pos];
+  const consume = () => tokens[pos++];
+
+  const parseExpr = (): number => {
+    let left = parseTerm();
+    while (peek() && peek().type === 'op' && (peek().value === '+' || peek().value === '-')) {
+      const op = consume().value;
+      const right = parseTerm();
+      left = op === '+' ? left + right : left - right;
+    }
+    return left;
+  };
+
+  const parseTerm = (): number => {
+    let left = parseFactor();
+    while (peek() && peek().type === 'op' && (peek().value === '*' || peek().value === '/')) {
+      const op = consume().value;
+      const right = parseFactor();
+      if (op === '/') {
+        if (right === 0) throw new Error('Division by zero in custom formula.');
+        left = left / right;
+      } else {
+        left = left * right;
+      }
+    }
+    return left;
+  };
+
+  const parseFactor = (): number => {
+    const tok = peek();
+    if (!tok) throw new Error('Unexpected end of custom formula.');
+    if (tok.type === 'op' && (tok.value === '+' || tok.value === '-')) {
+      consume();
+      const val = parseFactor();
+      return tok.value === '-' ? -val : val;
+    }
+    if (tok.type === 'lp') {
+      consume();
+      const val = parseExpr();
+      if (!peek() || peek().type !== 'rp') throw new Error('Missing closing parenthesis in custom formula.');
+      consume();
+      return val;
+    }
+    if (tok.type === 'num') {
+      consume();
+      const n = Number(tok.value);
+      if (!Number.isFinite(n)) throw new Error(`Invalid numeric literal "${tok.value}".`);
+      return n;
+    }
+    if (tok.type === 'id') {
+      consume();
+      const upper = tok.value.toUpperCase();
+      if (tok.value in vars) return vars[tok.value];
+      if (upper in vars) return vars[upper];
+      throw new Error(`Unknown variable "${tok.value}" in custom formula.`);
+    }
+    throw new Error(`Unexpected token "${tok.value}" in custom formula.`);
+  };
+
+  const result = parseExpr();
+  if (pos !== tokens.length) {
+    throw new Error(`Unexpected token "${tokens[pos].value}" in custom formula.`);
+  }
+  if (!Number.isFinite(result)) {
+    throw new Error('Custom formula evaluated to a non-finite number.');
+  }
+  return result;
+}
+
+export interface ItemFormulaOptions {
+  formulaCode?: string;
+  defaultLag?: number;
+  baseLag?: number;
+  fixedWeight?: number;
+  components?: ComponentConfig[];
+  customFormula?: string | null;
+  indexSource?: string | null;
+}
+
+function buildOptionsFromItem(
+  item: ItemRecord | null | undefined,
+  weights: Record<string, number>,
+  fallbackCode = ''
+): ItemFormulaOptions {
+  const formulaCode = (item?.pvc_formula_code || fallbackCode || 'IEEMA_WEIGHTED').replace(/\s+/g, '').toUpperCase();
+  return {
+    formulaCode,
+    defaultLag: getItemDefaultLag(item, formulaCode),
+    baseLag: getItemBaseLag(item),
+    fixedWeight: getItemFixedWeight(item, weights),
+    components: parseItemComponents(item, weights),
+    customFormula: item?.custom_formula || null,
+    indexSource: item?.index_source || null,
+  };
+}
+
 export function pvcPercent(
   baseDate: string | null | undefined,
   currentDate: string | null | undefined,
   idxMap: IndexTable,
   weights: Record<string, number>,
-  lag = 1
+  lag = 1,
+  opts?: ItemFormulaOptions
 ): number {
-  const base = ieemaRow(idxMap, baseDate, false);
-  const curr = ieemaRow(idxMap, currentDate, true, lag);
-  if (!base || !curr) return 0.0;
-  let total = 0.0;
-  for (const [key, weight] of Object.entries(weights)) {
-    const b = base.values[key];
-    const c = curr.values[key];
-    if (b !== undefined && b !== 0 && c !== undefined) {
-      total += Number(weight) * (c - b) / b;
-    }
-  }
-  return total;
+  const detail = pvcPercentDetailed(baseDate, currentDate, idxMap, 'CALC', weights, lag, opts);
+  return detail ? Number(detail.pvcpercent ?? 0) : 0.0;
 }
 
 export function pvcPercentDetailed(
@@ -190,38 +409,95 @@ export function pvcPercentDetailed(
   idxMap: IndexTable,
   scenario: string,
   weights: Record<string, number>,
-  lag = 1
+  lag = 1,
+  opts?: ItemFormulaOptions
 ): ScenarioDetail | null {
-  const base = ieemaRow(idxMap, baseDate, false);
-  const curr = ieemaRow(idxMap, currentDate, true, lag);
-  if (!base || !curr) return null;
+  if (!baseDate || !currentDate) return null;
+  const formulaCode = (opts?.formulaCode || 'IEEMA_WEIGHTED').replace(/\s+/g, '').toUpperCase();
+  const defaultLag = opts?.defaultLag !== undefined ? opts.defaultLag : lag;
+  const baseLag = opts?.baseLag ?? 0;
+  const fixedWeight = opts?.fixedWeight ?? getItemFixedWeight(null, weights);
+  const components =
+    opts?.components && opts.components.length > 0 ? opts.components : parseItemComponents(null, weights);
+
+  const primaryBase = baseLag > 0 ? ieemaRow(idxMap, baseDate, true, baseLag) : ieemaRow(idxMap, baseDate, false);
+  const primaryCurr = defaultLag > 0 ? ieemaRow(idxMap, currentDate, true, defaultLag) : ieemaRow(idxMap, currentDate, false);
+  if (!primaryBase || !primaryCurr) return null;
 
   const row: ScenarioDetail = {
     scenario,
-    basemonth: base.key,
-    currentmonth: curr.key,
+    basemonth: primaryBase.key,
+    currentmonth: primaryCurr.key,
     pvcpercent: 0.0,
+    formula_code: formulaCode,
+    fixed_weight: fixedWeight,
+    default_lag: defaultLag,
+    base_lag: baseLag,
+    index_source: opts?.indexSource || null,
   };
-  let total = 0.0;
-  const baseMStr = ymShortLabel(base.ym);
-  const currMStr = ymShortLabel(curr.ym);
 
-  for (const [key, weight] of Object.entries(weights)) {
-    const b = base.values[key];
-    const c = curr.values[key];
+  let total = 0.0;
+  let ratioSum = fixedWeight;
+  const customVars: Record<string, number> = { F: fixedWeight, FIXED: fixedWeight };
+
+  const activeComponents = formulaCode === 'SIMPLE_SINGLE_INDEX' ? components.slice(0, 1) : components;
+
+  for (const comp of activeComponents) {
+    const key = comp.key;
+    const compLag = comp.lag_months !== undefined && comp.lag_months !== null ? comp.lag_months : defaultLag;
+    const compBaseRow = baseLag > 0 ? ieemaRow(idxMap, baseDate, true, baseLag) : primaryBase;
+    const compCurrRow =
+      compLag === defaultLag
+        ? primaryCurr
+        : compLag > 0
+          ? ieemaRow(idxMap, currentDate, true, compLag)
+          : ieemaRow(idxMap, currentDate, false);
+
+    if (!compBaseRow || !compCurrRow) continue;
+
+    const b = compBaseRow.values[key];
+    const c = compCurrRow.values[key];
+    const effWeight = formulaCode === 'SIMPLE_SINGLE_INDEX' ? Math.max(0, 100 - fixedWeight) : Number(comp.weight);
+
     let contrib: number | null = null;
     if (b !== undefined && b !== 0 && c !== undefined) {
-      contrib = safeRound(Number(weight) * (c - b) / b, 4);
+      if (formulaCode === 'RATIO_MULTIPLIER') {
+        const ratioTerm = effWeight * (c / b);
+        ratioSum += ratioTerm;
+        contrib = safeRound(effWeight * ((c - b) / b), 4);
+      } else {
+        contrib = safeRound(effWeight * ((c - b) / b), 4);
+      }
       if (contrib !== null) total += contrib;
+      customVars[key] = c;
+      customVars[key.toUpperCase()] = c;
+      customVars[`${key}0`] = b;
+      customVars[`${key.toUpperCase()}0`] = b;
+      customVars[`W_${key}`] = effWeight;
+      customVars[`W_${key.toUpperCase()}`] = effWeight;
     }
-    row[`${key}_base`] = b !== undefined ? safeRound(b, 2) : null;
-    row[`${key}_current`] = c !== undefined ? safeRound(c, 2) : null;
-    row[`${key}_weight`] = weight;
+
+    row[`${key}_base`] = b !== undefined ? safeRound(b, 4) : null;
+    row[`${key}_current`] = c !== undefined ? safeRound(c, 4) : null;
+    row[`${key}_weight`] = effWeight;
+    row[`${key}_lag`] = compLag;
+    row[`${key}_label`] = comp.label || key;
+    row[`${key}_source`] = comp.source || opts?.indexSource || '';
     row[`${key}_contributionpct`] = contrib;
-    row[`${key}_actualbasemonth`] = baseMStr;
-    row[`${key}_actualcurrentmonth`] = currMStr;
+    row[`${key}_actualbasemonth`] = ymShortLabel(compBaseRow.ym);
+    row[`${key}_actualcurrentmonth`] = ymShortLabel(compCurrRow.ym);
   }
-  row.pvcpercent = safeRound(total, 4) ?? 0;
+
+  if (formulaCode === 'RATIO_MULTIPLIER') {
+    row.pvcpercent = safeRound(ratioSum - 100, 4) ?? 0;
+  } else if (formulaCode === 'CUSTOM_EXPRESSION' && opts?.customFormula) {
+    const evaluated = evaluateMathExpression(opts.customFormula, customVars);
+    row.pvcpercent = safeRound(evaluated, 4) ?? 0;
+    row.custom_formula = opts.customFormula;
+  } else {
+    row.pvcpercent = safeRound(total, 4) ?? 0;
+  }
+
   return row;
 }
 
@@ -745,9 +1021,11 @@ export function calcSingleRecord(
   data: PVCInputData,
   idxMap: IndexTable,
   weights: Record<string, number>,
-  itemCode = ''
+  itemCode = '',
+  item?: ItemRecord
 ): PVCCalculationOutput {
-  const lag = itemCode === 'TRACTIONMOTOR' ? 2 : 1;
+  const opts = buildOptionsFromItem(item, weights, itemCode);
+  const lag = opts.defaultLag ?? (itemCode === 'TRACTIONMOTOR' ? 2 : 1);
   const pvcBaseDate = data.pvcbasedate;
   const calDate = data.caldate;
   const origdp = data.origdp;
@@ -776,9 +1054,9 @@ export function calcSingleRecord(
   const lowerfreightTotal = lowerFreight * qty;
   const lowerrateApplicable = lowerRate > 0 && Boolean(lowerBaseDate);
 
-  const pctA2 = pvcPercent(pvcBaseDate, calDate, idxMap, weights, lag);
-  const pctB2 = b2Needed ? pvcPercent(pvcBaseDate, pvcScheduledDate, idxMap, weights, lag) : null;
-  const pctC1 = lowerrateApplicable ? pvcPercent(lowerBaseDate, calDate, idxMap, weights, lag) : null;
+  const pctA2 = pvcPercent(pvcBaseDate, calDate, idxMap, weights, lag, opts);
+  const pctB2 = b2Needed ? pvcPercent(pvcBaseDate, pvcScheduledDate, idxMap, weights, lag, opts) : null;
+  const pctC1 = lowerrateApplicable ? pvcPercent(lowerBaseDate, calDate, idxMap, weights, lag, opts) : null;
 
   let pctD1: number | null = null;
   let lowercontractual: number | null = null;
@@ -792,7 +1070,7 @@ export function calcSingleRecord(
     }
   }
   if (d1Applicable && b2Needed) {
-    pctD1 = pvcPercent(lowerBaseDate, pvcScheduledDate, idxMap, weights, lag);
+    pctD1 = pvcPercent(lowerBaseDate, pvcScheduledDate, idxMap, weights, lag, opts);
     pvcpersetd1 = (lowerRate * (pctD1 || 0)) / 100.0;
     lowercontractual = (lowerRate * qty + pvcpersetd1 * qty + lowerfreightTotal) * GST_FACTOR;
   }
@@ -845,7 +1123,7 @@ export function calcSingleRecord(
   if (d1Applicable && b2Needed) scList.push(['D1', lowerBaseDate, pvcScheduledDate]);
   for (const [sc, bd, cd] of scList) {
     if (bd && cd) {
-      const det = pvcPercentDetailed(bd, cd, idxMap, sc, weights, lag);
+      const det = pvcPercentDetailed(bd, cd, idxMap, sc, weights, lag, opts);
       if (det) scenariodetails.push(det);
     }
   }
@@ -894,5 +1172,5 @@ export function calculateForItem(
     }
     return calculateIGBTPropulsion(item, data, tenderId, idxMap, weights);
   }
-  return calcSingleRecord(data, idxMap, weights, code);
+  return calcSingleRecord(data, idxMap, weights, code, item);
 }

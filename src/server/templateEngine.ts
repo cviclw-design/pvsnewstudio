@@ -40,10 +40,6 @@ export function buildUrlFor(endpoint: string, params: Record<string, unknown> = 
       return `/pvc/calc/${params.calcid}`;
     case 'pvc.export_calc_excel':
       return `/pvc/calc/${params.calcid}/excel`;
-    case 'pvc.process_rnote_and_ic':
-      return `/pvc/process_rnote/${params.rnote_no}`;
-    case 'pvc.process_po_and_ma':
-      return `/pvc/process_po/${params.po_no}`;
     case 'admin.items_list':
       return '/admin/items';
     case 'admin.items_new':
@@ -61,6 +57,8 @@ export function buildUrlFor(endpoint: string, params: Record<string, unknown> = 
       return `/admin/items/${params.itemid}/indices/${params.rowid}/edit`;
     case 'admin.item_indices_delete':
       return `/admin/items/${params.itemid}/indices/${params.rowid}/delete`;
+    case 'admin.item_indices_attachment_delete':
+      return `/admin/items/${params.itemid}/indices/${params.rowid}/attachments/${params.attid}/delete`;
     case 'admin.tenders_list':
       return '/admin/tenders';
     case 'admin.tenders_new':

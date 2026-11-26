@@ -7,7 +7,12 @@ export const mainRouter = express.Router();
 mainRouter.get('/', (_req, res) => {
   res.locals.request.endpoint = 'main.index';
   const stats = store.getStats();
-  res.render('dashboard.html', { stats });
+  const items = store.getItems();
+  const user = res.locals.current_user;
+  const recentCalcs = user?.is_authenticated
+    ? (user.is_admin ? store.getPVCResults() : store.getPVCResults(user.id)).slice(0, 6)
+    : [];
+  res.render('dashboard.html', { stats, items, recentCalcs });
 });
 
 mainRouter.get('/history', requireLogin, (req, res) => {

@@ -1,48 +1,85 @@
 {% extends "base.html" %}
-{% block title %}{{ item.name }} Indices{% endblock %}
+{% block title %}{{ item.name }} Monthly Indices — PVC Calculation Studio{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="pvc-page-header">
   <div>
-    <h3 class="mb-1">Indices – {{ item.name }}</h3>
-    <p class="text-muted mb-0">Monthly index values used for PVC calculation</p>
+    <h1 class="pvc-page-title">Monthly Indices — {{ item.name }}</h1>
   </div>
-  <div>
-    <button type="button" class="btn btn-outline-secondary me-2" onclick="window.history.back()"><i class="bi bi-arrow-left"></i> Back</button>
-    <a href="{{ url_for('admin.items_list') }}" class="btn btn-outline-secondary me-2">Back to Items</a>
-    <a href="{{ url_for('admin.item_indices_new', itemid=item.id) }}" class="btn btn-primary">
-      <i class="bi bi-plus-circle"></i> Add Indices
+  <div class="d-flex flex-wrap gap-2">
+    <a href="{{ url_for('admin.items_list') }}" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-arrow-left me-1"></i>Back
+    </a>
+    <a href="{{ url_for('admin.item_indices_new', itemid=item.id) }}" class="btn btn-primary btn-sm">
+      <i class="bi bi-plus-circle me-1"></i>Add Month
     </a>
   </div>
 </div>
 
 {% if rows %}
-<div class="card shadow-sm">
+<div class="card">
   <div class="card-body p-0">
     <div class="table-responsive">
-      <table class="table table-sm table-bordered table-hover mb-0 align-middle">
-        <thead class="table-light">
+      <table class="table table-hover mb-0 align-middle">
+        <thead>
           <tr>
-            <th>Month</th>
-            <th>Indices JSON</th>
-            <th>Actions</th>
+            <th style="width: 110px;">Month</th>
+            <th>Indices</th>
+            <th style="width: 240px;">Proofs (PDF / Image)</th>
+            <th class="text-end" style="width: 160px;">Actions</th>
           </tr>
         </thead>
         <tbody>
           {% for r in rows %}
           <tr>
-            <td>{{ r.month | strftime('%Y-%m') }}</td>
-            <td style="max-width: 350px; word-break: break-all;">
-              <small class="text-muted">{{ r.indices_json }}</small>
+            <td class="mono-num fw-semibold">{{ r.month | strftime('%Y-%m') }}</td>
+            <td style="max-width: 440px; word-break: break-word;">
+              <code class="small text-dark">{{ r.indices_json }}</code>
             </td>
             <td>
+              {% if r.attachments and r.attachments | length > 0 %}
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                  {% for att in r.attachments %}
+                    {% set is_pdf = (att.file_type == 'pdf') or (att.mime_type == 'application/pdf') %}
+                    {% if is_pdf %}
+                      <button
+                        type="button"
+                        class="btn btn-sm btn-outline-danger d-inline-flex align-items-center gap-1"
+                        onclick="openProofModal('{{ att.url }}', '{{ att.original_name | replace("'", "\\'") }}', '{{ att.mime_type }}', '{{ item.name | replace("'", "\\'") }} · {{ r.month | strftime('%Y-%m') }}')"
+                        title="{{ att.original_name }}"
+                      >
+                        <i class="bi bi-file-earmark-pdf-fill"></i>
+                        <span class="small">PDF</span>
+                      </button>
+                    {% else %}
+                      <img
+                        src="{{ att.url }}"
+                        alt="{{ att.original_name }}"
+                        class="proof-mini-thumb"
+                        title="{{ att.original_name }}"
+                        referrerpolicy="no-referrer"
+                        onclick="openProofModal('{{ att.url }}', '{{ att.original_name | replace("'", "\\'") }}', '{{ att.mime_type }}', '{{ item.name | replace("'", "\\'") }} · {{ r.month | strftime('%Y-%m') }}')"
+                      >
+                    {% endif %}
+                  {% endfor %}
+                  <span class="small text-muted mono-num">{{ r.attachments | length }}</span>
+                </div>
+              {% else %}
+                <span class="small text-muted">—</span>
+              {% endif %}
+            </td>
+            <td class="text-end text-nowrap">
               <a href="{{ url_for('admin.item_indices_edit', itemid=item.id, rowid=r.id) }}"
-                 class="btn btn-sm btn-warning me-1">Edit</a>
+                 class="btn btn-sm btn-outline-secondary me-1">
+                <i class="bi bi-pencil"></i> Edit
+              </a>
               <form method="post"
                     action="{{ url_for('admin.item_indices_delete', itemid=item.id, rowid=r.id) }}"
                     class="d-inline"
-                    onsubmit="return confirm('Delete index row for {{ r.month | strftime('%Y-%m') }}?')">
-                <button class="btn btn-sm btn-danger">Delete</button>
+                    onsubmit="return requestDeleteConfirm(this, 'Delete index row and attached proofs for {{ r.month | strftime('%Y-%m') }}?')">
+                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete month">
+                  <i class="bi bi-trash"></i>
+                </button>
               </form>
             </td>
           </tr>
@@ -52,24 +89,29 @@
     </div>
   </div>
 
-  <!-- Pagination -->
   {% if pagination and pagination.pages > 1 %}
-  <nav class="mt-3">
-    <ul class="pagination justify-content-center">
-      <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
-        <a class="page-link" href="{{ url_for('admin.item_indices_list', itemid=item.id, page=pagination.prev_num) }}">Previous</a>
-      </li>
-      <li class="page-item disabled">
-        <span class="page-link">Page {{ pagination.page }} of {{ pagination.pages }}</span>
-      </li>
-      <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
-        <a class="page-link" href="{{ url_for('admin.item_indices_list', itemid=item.id, page=pagination.next_num) }}">Next</a>
-      </li>
-    </ul>
-  </nav>
+  <div class="card-footer bg-white border-top py-3">
+    <nav aria-label="Indices pagination">
+      <ul class="pagination pagination-sm justify-content-center mb-0">
+        <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+          <a class="page-link" href="{{ url_for('admin.item_indices_list', itemid=item.id, page=pagination.prev_num) }}">Previous</a>
+        </li>
+        <li class="page-item disabled">
+          <span class="page-link mono-num">Page {{ pagination.page }} / {{ pagination.pages }}</span>
+        </li>
+        <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+          <a class="page-link" href="{{ url_for('admin.item_indices_list', itemid=item.id, page=pagination.next_num) }}">Next</a>
+        </li>
+      </ul>
+    </nav>
+  </div>
   {% endif %}
 </div>
 {% else %}
-<div class="alert alert-info">No indices defined yet for this item.</div>
+<div class="card">
+  <div class="card-body text-center py-5 text-muted">
+    <p class="mb-0">No monthly indices recorded.</p>
+  </div>
+</div>
 {% endif %}
 {% endblock %}

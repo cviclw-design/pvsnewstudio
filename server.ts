@@ -6,7 +6,8 @@ import cookieParser from 'cookie-parser';
 import session from 'express-session';
 import { configureNunjucks } from './src/server/templateEngine.js';
 import { store } from './src/server/store.js';
-import { authRouter } from './src/server/routes/auth.js';
+import { isHttpsRequest, verifyAuthToken } from './src/server/authToken.js';
+import { authRouter, consumeUserFlashes } from './src/server/routes/auth.js';
 import { mainRouter } from './src/server/routes/main.js';
 import { pvcRouter } from './src/server/routes/pvc.js';
 import { adminRouter } from './src/server/routes/admin.js';
@@ -25,31 +26,61 @@ const ROOT_DIR = path.basename(__dirname) === 'dist' ? path.resolve(__dirname, '
 const app = express();
 app.set('trust proxy', 1);
 
+// Ensure all HTTPS cookies include SameSite=None; Secure; Partitioned (CHIPS)
+// so cross-origin preview iframes (Chrome/Edge/Firefox) never drop session cookies.
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (isHttpsRequest(req)) {
+    const origSetHeader = res.setHeader.bind(res);
+    res.setHeader = ((name: string, value: number | string | readonly string[]) => {
+      if (name.toLowerCase() === 'set-cookie') {
+        const list = Array.isArray(value) ? [...value] : [String(value)];
+        const patched = list.map((cookieStr) => {
+          let c = String(cookieStr);
+          if (!/;\s*samesite=/i.test(c)) {
+            c += '; SameSite=None';
+          } else {
+            c = c.replace(/;\s*samesite=lax/i, '; SameSite=None');
+          }
+          if (!/;\s*secure\b/i.test(c)) {
+            c += '; Secure';
+          }
+          if (!/;\s*partitioned\b/i.test(c)) {
+            c += '; Partitioned';
+          }
+          return c;
+        });
+        return origSetHeader(name, patched);
+      }
+      return origSetHeader(name, value);
+    }) as typeof res.setHeader;
+  }
+  next();
+});
+
 // Body & cookie parsing
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '15mb' }));
+app.use(express.json({ limit: '15mb' }));
 app.use(cookieParser());
 
-// Session middleware configured to work seamlessly both on localhost HTTP and AI Studio HTTPS iframe
+// Session middleware (works on both localhost HTTP and HTTPS cross-origin iframe)
 app.use(
   session({
     name: 'pvc_session',
-    secret: process.env.SECRET_KEY || 'clw-pvc-dev-secret-change-in-prod',
+    secret: process.env.SECRET_KEY || 'pvc-studio-dev-secret-change-in-prod',
     resave: false,
     saveUninitialized: false,
     proxy: true,
     cookie: {
       httpOnly: true,
-      maxAge: 1000 * 60 * 60 * 12, // 12 hours
+      maxAge: 1000 * 60 * 60 * 12,
       sameSite: 'lax',
       secure: false,
     },
   })
 );
 
-// Dynamically adjust SameSite=None; Secure when served over HTTPS proxy (AI Studio iframe)
 app.use((req, _res, next) => {
-  const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  const isHttps = isHttpsRequest(req);
   if (req.session && req.session.cookie) {
     req.session.cookie.sameSite = isHttps ? 'none' : 'lax';
     req.session.cookie.secure = isHttps;
@@ -57,20 +88,63 @@ app.use((req, _res, next) => {
   next();
 });
 
-// Static assets
+// Static assets (CSS, JS, uploaded monthly index images/PDFs, generated UI graphics)
 app.use('/static', express.static(path.join(ROOT_DIR, 'static')));
+app.use('/src/assets', express.static(path.join(ROOT_DIR, 'src/assets')));
 
 // Configure Nunjucks template engine
 configureNunjucks(app, path.join(ROOT_DIR, 'templates'));
 
-// Inject Flask-compatible template context locals
+// Inject template locals & resolve authenticated user (session -> signed cookie -> iframe fallback token)
 app.use((req: Request, res: Response, next: NextFunction) => {
-  const userId = req.session?.userId;
+  let userId: number | undefined = req.session?.userId;
+  let fallbackToken = '';
+
+  if (!userId && req.cookies?.pvc_auth) {
+    const uidFromCookie = verifyAuthToken(String(req.cookies.pvc_auth));
+    if (uidFromCookie) {
+      userId = uidFromCookie;
+      if (req.session) req.session.userId = uidFromCookie;
+    }
+  }
+
+  if (!userId) {
+    const rawToken =
+      (typeof req.query._t === 'string' && req.query._t) ||
+      (req.body && typeof req.body._t === 'string' && req.body._t) ||
+      (typeof req.headers['x-pvc-auth'] === 'string' && req.headers['x-pvc-auth']) ||
+      '';
+    if (rawToken) {
+      const uidFromToken = verifyAuthToken(rawToken);
+      if (uidFromToken) {
+        userId = uidFromToken;
+        fallbackToken = rawToken;
+        if (req.session) req.session.userId = uidFromToken;
+      }
+    }
+  }
+
   const user = userId ? store.getUserById(userId) : undefined;
 
   res.locals.current_user = user
     ? { ...user, is_authenticated: true }
     : { id: null, username: 'Guest', is_admin: false, is_authenticated: false };
+
+  res.locals.pvc_fallback_token = fallbackToken;
+
+  if (fallbackToken) {
+    const origRedirect = res.redirect.bind(res);
+    res.redirect = ((statusOrUrl: number | string, maybeUrl?: string) => {
+      const hasStatus = typeof statusOrUrl === 'number';
+      const status = hasStatus ? statusOrUrl : 302;
+      let target = hasStatus ? String(maybeUrl || '/') : String(statusOrUrl);
+      if (target.startsWith('/') && !target.startsWith('//') && !target.startsWith('/login') && !target.startsWith('/register') && !target.includes('_t=')) {
+        const sep = target.includes('?') ? '&' : '?';
+        target = `${target}${sep}_t=${encodeURIComponent(fallbackToken)}`;
+      }
+      return origRedirect(status, target);
+    }) as typeof res.redirect;
+  }
 
   res.locals.request = {
     endpoint: '',
@@ -78,23 +152,25 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   };
 
   res.locals.get_flashed_messages = (_withCategories = true) => {
-    const flashes = req.session?.flashes ? [...req.session.flashes] : [];
+    const sessionFlashes = req.session?.flashes ? [...req.session.flashes] : [];
     if (req.session) req.session.flashes = [];
-    return flashes;
+    const userFlashes = consumeUserFlashes(user?.id);
+    if (sessionFlashes.length > 0) return sessionFlashes;
+    return userFlashes;
   };
 
   next();
 });
 
-// Register blueprints
+// Register routes
 app.use('/', authRouter);
 app.use('/', mainRouter);
 app.use('/pvc', pvcRouter);
 app.use('/admin', adminRouter);
 
-// Health check endpoint
+// Health check
 app.get('/healthz', (_req, res) => {
-  res.json({ status: 'ok', app: 'CLW PVC Calculation System' });
+  res.json({ status: 'ok', app: 'PVC Calculation Studio' });
 });
 
 // 404 handler
@@ -110,5 +186,5 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 
 const PORT = Number(process.env.PORT) || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`CLW PVC Calculation System listening on http://0.0.0.0:${PORT}`);
+  console.log(`PVC Calculation Studio listening on http://0.0.0.0:${PORT}`);
 });

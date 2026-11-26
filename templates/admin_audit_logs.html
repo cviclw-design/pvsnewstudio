@@ -1,24 +1,30 @@
 {% extends "base.html" %}
 
-{% block content %}
-<div class="container-fluid mt-4">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2>Audit Logs</h2>
-        <span class="text-muted">Showing last 200 actions</span>
-    </div>
+{% block title %}Audit Logs — PVC Calculation Studio{% endblock %}
 
+{% block content %}
+<div class="pvc-page-header">
+  <div>
+    <div class="pvc-section-label">Administration</div>
+    <h1 class="pvc-page-title">Audit Logs</h1>
+  </div>
+  <span class="mono-num small text-muted">Last 200 entries</span>
+</div>
+
+<div class="card">
+  <div class="card-body p-0">
     <div class="table-responsive">
-        <table class="table table-bordered table-striped table-sm">
-            <thead class="thead-dark">
-                <tr>
-                    <th style="width: 5%">ID</th>
-                    <th style="width: 15%">Timestamp (UTC)</th>
-                    <th style="width: 10%">User</th>
-                    <th style="width: 10%">Action</th>
-                    <th style="width: 15%">Table (Row ID)</th>
-                    <th style="width: 45%">Changes</th>
-                </tr>
-            </thead>
+      <table class="table table-hover table-sm mb-0 align-middle">
+        <thead>
+          <tr>
+            <th style="width: 6%">ID</th>
+            <th style="width: 16%">Timestamp (UTC)</th>
+            <th style="width: 11%">User</th>
+            <th style="width: 10%">Action</th>
+            <th style="width: 15%">Table</th>
+            <th style="width: 42%">Changes</th>
+          </tr>
+        </thead>
             <tbody>
                 {% for log in logs %}
                 <tr>
@@ -54,6 +60,7 @@
                 {% endfor %}
             </tbody>
         </table>
+      </div>
     </div>
-</div>
+  </div>
 {% endblock %}

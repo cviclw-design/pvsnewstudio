@@ -10,6 +10,14 @@ export interface UserRecord {
   is_admin: boolean;
 }
 
+export interface ComponentConfig {
+  key: string;
+  label: string;
+  weight: number;
+  lag_months?: number | null;
+  source?: string | null;
+}
+
 export interface ItemRecord {
   id: number;
   name: string;
@@ -18,6 +26,23 @@ export interface ItemRecord {
   pvc_formula_code: string;
   weights_json: string;
   extra_fields_json: string;
+  lag_months?: number;
+  base_lag_months?: number;
+  fixed_weight?: number;
+  index_source?: string | null;
+  components_json?: string;
+  custom_formula?: string | null;
+}
+
+export interface IndexAttachment {
+  id: string;
+  original_name: string;
+  stored_name: string;
+  mime_type: string;
+  file_type: 'image' | 'pdf';
+  size: number;
+  url: string;
+  uploaded_at: string;
 }
 
 export interface ItemIndexRecord {
@@ -26,6 +51,7 @@ export interface ItemIndexRecord {
   /** Normalized to YYYY-MM-01 */
   month: string;
   indices_json: string;
+  attachments?: IndexAttachment[];
 }
 
 export interface TenderMasterRecord {
@@ -159,11 +185,14 @@ export interface IGBTIndexDetail {
   vendor: string;
   currency: string;
   parameter: string;
+  label?: string;
   basevalue: number;
   currentvalue: number;
   weight: number | null;
   basemonth: string;
   currentmonth: string;
+  actualbasemonth?: string;
+  actualcurrentmonth?: string;
   [key: string]: unknown;
 }
 
