@@ -5,7 +5,7 @@
 <div class="d-flex flex-column gap-4">
 
   <!-- Clean Executive Header Banner (Zero Action Buttons) -->
-  <section class="card overflow-hidden">
+  <section class="card overflow-hidden pvc-interactive-card">
     <div class="row g-0 align-items-stretch">
       <div class="col-lg-7 p-4 p-lg-5 d-flex flex-column justify-content-center">
         <div class="pvc-section-label mb-2">Price Variation Workbench</div>
@@ -43,41 +43,73 @@
   <!-- Live Operational Metrics Strip -->
   <section class="row g-3">
     <div class="col-md-4">
-      <div class="pvc-kpi-card">
+      <div class="pvc-kpi-card pvc-interactive-card">
         <div class="pvc-kpi-label">Saved Calculations</div>
-        <div class="pvc-kpi-value">{{ stats.totalCalculations if stats else 0 }}</div>
+        <div class="pvc-kpi-value" data-countup="{{ stats.totalCalculations if stats else 0 }}">{{ stats.totalCalculations if stats else 0 }}</div>
       </div>
     </div>
     <div class="col-md-4">
-      <div class="pvc-kpi-card">
+      <div class="pvc-kpi-card pvc-interactive-card">
         <div class="pvc-kpi-label">Configured PVC Items</div>
-        <div class="pvc-kpi-value">{{ stats.totalItems if stats else (items | length if items else 0) }}</div>
+        <div class="pvc-kpi-value" data-countup="{{ stats.totalItems if stats else (items | length if items else 0) }}">{{ stats.totalItems if stats else (items | length if items else 0) }}</div>
       </div>
     </div>
     <div class="col-md-4">
-      <div class="pvc-kpi-card">
+      <div class="pvc-kpi-card pvc-interactive-card">
         <div class="pvc-kpi-label">Active Tenders</div>
-        <div class="pvc-kpi-value">{{ stats.activeContracts if stats else 0 }}</div>
+        <div class="pvc-kpi-value" data-countup="{{ stats.activeContracts if stats else 0 }}">{{ stats.activeContracts if stats else 0 }}</div>
       </div>
     </div>
   </section>
 
+  <!-- Interactive Monthly Index Trend Explorer (Zero Buttons) -->
+  {% if dashboardSeries and dashboardSeries | length > 0 %}
+  <section class="card" id="dashTrendSection">
+    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-3">
+      <div>
+        <h6 class="fw-bold mb-0">Monthly Index Movement</h6>
+        <div class="small text-muted mono-num mt-1" id="trendMetaLine">—</div>
+      </div>
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <select id="trendItemSelect" class="form-select form-select-sm" style="min-width: 220px;" aria-label="Select item for trend chart">
+          {% for s in dashboardSeries %}
+          <option value="{{ s.id }}">{{ s.name }}</option>
+          {% endfor %}
+        </select>
+        <select id="trendParamSelect" class="form-select form-select-sm" style="min-width: 190px;" aria-label="Select parameter view">
+          <option value="__ALL__">All Parameters (Base = 100)</option>
+        </select>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="pvc-chart-stage position-relative" id="trendChartStage">
+        <svg id="trendSvg" class="w-100" viewBox="0 0 880 260" preserveAspectRatio="xMidYMid meet" style="height: 260px; display: block;"></svg>
+        <div id="trendTooltip" class="pvc-chart-tooltip d-none"></div>
+      </div>
+      <div id="trendLegend" class="d-flex flex-wrap align-items-center gap-3 mt-3 pt-2 border-top small"></div>
+    </div>
+  </section>
+  {% endif %}
+
   <!-- Configured PVC Items Summary -->
   {% if items and items | length > 0 %}
   <section class="card">
-    <div class="card-header d-flex justify-content-between align-items-center">
-      <h6 class="fw-bold mb-0">Configured PVC Items</h6>
-      <span class="mono-num small text-muted">{{ items | length }}</span>
+    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <div class="d-flex align-items-center gap-2">
+        <h6 class="fw-bold mb-0">Configured PVC Items</h6>
+        <span class="mono-num small text-muted">({{ items | length }})</span>
+      </div>
+      <input type="search" class="form-control form-control-sm" style="width: 220px;" placeholder="Filter items..." data-table-filter="#dashItemsTable" aria-label="Filter items">
     </div>
     <div class="card-body p-0">
       <div class="table-responsive">
-        <table class="table table-hover mb-0 align-middle">
+        <table class="table table-hover mb-0 align-middle" id="dashItemsTable">
           <thead>
             <tr>
-              <th>Item</th>
-              <th>Formula</th>
-              <th class="text-center">Lag</th>
-              <th>Index Source</th>
+              <th data-sort="text">Item</th>
+              <th data-sort="text">Formula</th>
+              <th class="text-center" data-sort="num">Lag</th>
+              <th data-sort="text">Index Source</th>
             </tr>
           </thead>
           <tbody>
@@ -98,29 +130,32 @@
   </section>
   {% endif %}
 
-  <!-- Recent PVC Calculations (Read-only overview) -->
+  <!-- Recent PVC Calculations (Interactive Row Click to Open Report) -->
   {% if recentCalcs and recentCalcs | length > 0 %}
   {% set sc_names = {"A2": "Actual PVC", "B2": "Contractual PVC", "C1": "Lower Actual PVC", "D1": "Lower Contractual PVC"} %}
   <section class="card">
-    <div class="card-header d-flex justify-content-between align-items-center">
-      <h6 class="fw-bold mb-0">Recent PVC Calculations</h6>
-      <span class="mono-num small text-muted">{{ recentCalcs | length }}</span>
+    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <div class="d-flex align-items-center gap-2">
+        <h6 class="fw-bold mb-0">Recent PVC Calculations</h6>
+        <span class="mono-num small text-muted">({{ recentCalcs | length }})</span>
+      </div>
+      <input type="search" class="form-control form-control-sm" style="width: 220px;" placeholder="Filter calculations..." data-table-filter="#dashCalcsTable" aria-label="Filter recent calculations">
     </div>
     <div class="card-body p-0">
       <div class="table-responsive">
-        <table class="table table-hover mb-0 align-middle">
+        <table class="table table-hover mb-0 align-middle" id="dashCalcsTable">
           <thead>
             <tr>
-              <th>ID</th>
-              <th>Date</th>
-              <th>Item</th>
-              <th>Scenario</th>
-              <th class="text-end">Final Payable (₹)</th>
+              <th data-sort="num">ID</th>
+              <th data-sort="text">Date</th>
+              <th data-sort="text">Item</th>
+              <th data-sort="text">Scenario</th>
+              <th class="text-end" data-sort="num">Final Payable (₹)</th>
             </tr>
           </thead>
           <tbody>
             {% for r in recentCalcs %}
-            <tr>
+            <tr class="pvc-clickable-row" data-row-href="{{ url_for('pvc.view_calc', calcid=r.id) }}" tabindex="0">
               <td class="mono-num text-muted">#{{ r.id }}</td>
               <td class="mono-num small text-muted">{{ r.created_at | strftime('%Y-%m-%d %H:%M') if r.created_at else '—' }}</td>
               <td class="fw-semibold text-dark">{{ r.item.name if r.item else '—' }}</td>
@@ -136,4 +171,250 @@
   {% endif %}
 
 </div>
+{% endblock %}
+
+{% block extrajs %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  var SERIES = {{ dashboardSeries | tojson if dashboardSeries else '[]' }};
+  var itemSel = document.getElementById('trendItemSelect');
+  var paramSel = document.getElementById('trendParamSelect');
+  var svg = document.getElementById('trendSvg');
+  var tooltip = document.getElementById('trendTooltip');
+  var legendEl = document.getElementById('trendLegend');
+  var metaLine = document.getElementById('trendMetaLine');
+  if (!SERIES.length || !itemSel || !svg) return;
+
+  var COLORS = ['#1d4ed8', '#15803d', '#b45309', '#b91c1c', '#0f766e', '#6d28d9', '#be185d'];
+  var hiddenKeys = {};
+  var activeSeries = SERIES[0];
+
+  function populateParams() {
+    var prev = paramSel.value;
+    paramSel.innerHTML = '<option value="__ALL__">All Parameters (Base = 100)</option>';
+    (activeSeries.keys || []).forEach(function(k) {
+      var opt = document.createElement('option');
+      opt.value = k;
+      opt.textContent = k + ' (Raw Value)';
+      paramSel.appendChild(opt);
+    });
+    if (prev && (prev === '__ALL__' || (activeSeries.keys || []).indexOf(prev) !== -1)) {
+      paramSel.value = prev;
+    } else {
+      paramSel.value = '__ALL__';
+    }
+  }
+
+  function renderChart() {
+    var pts = activeSeries.points || [];
+    var mode = paramSel.value || '__ALL__';
+    var W = 880, H = 260;
+    var pad = { top: 20, right: 24, bottom: 34, left: 56 };
+    var plotW = W - pad.left - pad.right;
+    var plotH = H - pad.top - pad.bottom;
+
+    if (!pts.length) {
+      svg.innerHTML = '<text x="440" y="130" text-anchor="middle" fill="#64748b" font-size="13">No monthly index data recorded for this item.</text>';
+      legendEl.innerHTML = '';
+      metaLine.textContent = activeSeries.formula + ' · ' + activeSeries.source;
+      return;
+    }
+
+    metaLine.textContent =
+      activeSeries.formula + ' · ' + activeSeries.source + ' · ' +
+      pts[0].month + ' to ' + pts[pts.length - 1].month + ' (' + pts.length + ' months)';
+
+    var keysToPlot = mode === '__ALL__'
+      ? (activeSeries.keys || []).slice(0, 7)
+      : [mode];
+
+    var baseByKey = {};
+    keysToPlot.forEach(function(k) {
+      for (var i = 0; i < pts.length; i++) {
+        var v = pts[i].values[k];
+        if (typeof v === 'number' && v !== 0) {
+          baseByKey[k] = v;
+          break;
+        }
+      }
+    });
+
+    var visibleKeys = keysToPlot.filter(function(k) { return !hiddenKeys[k]; });
+    var minY = Infinity, maxY = -Infinity;
+    visibleKeys.forEach(function(k) {
+      pts.forEach(function(p) {
+        var raw = p.values[k];
+        if (typeof raw !== 'number') return;
+        var yVal = mode === '__ALL__' ? (baseByKey[k] ? (raw / baseByKey[k]) * 100 : 100) : raw;
+        if (yVal < minY) minY = yVal;
+        if (yVal > maxY) maxY = yVal;
+      });
+    });
+
+    if (!isFinite(minY) || !isFinite(maxY)) {
+      minY = 90; maxY = 110;
+    }
+    if (Math.abs(maxY - minY) < 0.001) {
+      minY -= 5; maxY += 5;
+    }
+    var yMargin = (maxY - minY) * 0.12;
+    minY -= yMargin;
+    maxY += yMargin;
+
+    function xPos(idx) {
+      if (pts.length === 1) return pad.left + plotW / 2;
+      return pad.left + (idx / (pts.length - 1)) * plotW;
+    }
+    function yPos(val) {
+      return pad.top + plotH - ((val - minY) / (maxY - minY)) * plotH;
+    }
+
+    var svgParts = [];
+
+    // Gridlines + Y labels
+    var ticks = 4;
+    for (var t = 0; t <= ticks; t++) {
+      var vTick = minY + ((maxY - minY) * t) / ticks;
+      var y = yPos(vTick);
+      svgParts.push('<line x1="' + pad.left + '" y1="' + y.toFixed(1) + '" x2="' + (W - pad.right) + '" y2="' + y.toFixed(1) + '" stroke="#e2e8f0" stroke-width="1"/>');
+      svgParts.push('<text x="' + (pad.left - 8) + '" y="' + (y + 4).toFixed(1) + '" text-anchor="end" fill="#64748b" font-size="11" font-family="JetBrains Mono, monospace">' + vTick.toFixed(mode === '__ALL__' ? 1 : 2) + '</text>');
+    }
+
+    // X-axis month labels (evenly sampled up to 7 labels)
+    var step = Math.max(1, Math.ceil(pts.length / 7));
+    for (var xi = 0; xi < pts.length; xi += step) {
+      var x = xPos(xi);
+      svgParts.push('<text x="' + x.toFixed(1) + '" y="' + (H - 10) + '" text-anchor="middle" fill="#64748b" font-size="11" font-family="JetBrains Mono, monospace">' + pts[xi].month + '</text>');
+    }
+    if ((pts.length - 1) % step !== 0 && pts.length > 1) {
+      svgParts.push('<text x="' + xPos(pts.length - 1).toFixed(1) + '" y="' + (H - 10) + '" text-anchor="end" fill="#64748b" font-size="11" font-family="JetBrains Mono, monospace">' + pts[pts.length - 1].month + '</text>');
+    }
+
+    // Baseline 100 reference line in normalized mode
+    if (mode === '__ALL__' && 100 >= minY && 100 <= maxY) {
+      var y100 = yPos(100);
+      svgParts.push('<line x1="' + pad.left + '" y1="' + y100.toFixed(1) + '" x2="' + (W - pad.right) + '" y2="' + y100.toFixed(1) + '" stroke="#94a3b8" stroke-dasharray="4 4" stroke-width="1"/>');
+    }
+
+    // Series polylines & points
+    visibleKeys.forEach(function(k) {
+      var colorIdx = (activeSeries.keys || []).indexOf(k);
+      var col = COLORS[(colorIdx >= 0 ? colorIdx : 0) % COLORS.length];
+      var coords = [];
+      pts.forEach(function(p, idx) {
+        var raw = p.values[k];
+        if (typeof raw !== 'number') return;
+        var yVal = mode === '__ALL__' ? (baseByKey[k] ? (raw / baseByKey[k]) * 100 : 100) : raw;
+        coords.push({ x: xPos(idx), y: yPos(yVal) });
+      });
+      if (coords.length > 1) {
+        var d = coords.map(function(c, i) { return (i === 0 ? 'M' : 'L') + c.x.toFixed(1) + ' ' + c.y.toFixed(1); }).join(' ');
+        svgParts.push('<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>');
+      }
+      coords.forEach(function(c) {
+        svgParts.push('<circle cx="' + c.x.toFixed(1) + '" cy="' + c.y.toFixed(1) + '" r="3.2" fill="#ffffff" stroke="' + col + '" stroke-width="2"/>');
+      });
+    });
+
+    // Hover crosshair group
+    svgParts.push('<line id="chartHoverLine" x1="0" y1="' + pad.top + '" x2="0" y2="' + (H - pad.bottom) + '" stroke="#0f172a" stroke-opacity="0.25" stroke-dasharray="3 3" stroke-width="1" visibility="hidden"/>');
+    svgParts.push('<rect id="chartHitArea" x="' + pad.left + '" y="' + pad.top + '" width="' + plotW + '" height="' + plotH + '" fill="transparent" style="cursor:crosshair;"/>');
+
+    svg.innerHTML = svgParts.join('');
+
+    // Interactive Legend (text links with color bar — zero pills, zero buttons)
+    legendEl.innerHTML = '';
+    keysToPlot.forEach(function(k) {
+      var colorIdx = (activeSeries.keys || []).indexOf(k);
+      var col = COLORS[(colorIdx >= 0 ? colorIdx : 0) % COLORS.length];
+      var isHidden = Boolean(hiddenKeys[k]);
+      var lastVal = pts[pts.length - 1].values[k];
+      var baseVal = baseByKey[k];
+      var chg = (typeof lastVal === 'number' && baseVal) ? ((lastVal - baseVal) / baseVal) * 100 : null;
+
+      var item = document.createElement('span');
+      item.setAttribute('role', 'checkbox');
+      item.setAttribute('aria-checked', String(!isHidden));
+      item.setAttribute('tabindex', '0');
+      item.className = 'd-inline-flex align-items-center gap-2 mono-num pvc-legend-item';
+      item.style.cursor = 'pointer';
+      item.style.opacity = isHidden ? '0.38' : '1';
+      item.innerHTML =
+        '<span style="width:12px;height:3px;border-radius:2px;background:' + col + ';display:inline-block;"></span>' +
+        '<strong class="text-dark">' + k + '</strong>' +
+        (chg !== null
+          ? '<span class="' + (chg > 0 ? 'text-pvc-up' : chg < 0 ? 'text-pvc-down' : 'text-muted') + '">' + (chg > 0 ? '+' : '') + chg.toFixed(2) + '%</span>'
+          : '');
+
+      function toggleSeries() {
+        if (mode !== '__ALL__') return;
+        hiddenKeys[k] = !hiddenKeys[k];
+        renderChart();
+      }
+      item.addEventListener('click', toggleSeries);
+      item.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSeries(); }
+      });
+      legendEl.appendChild(item);
+    });
+
+    // Hover tooltip interaction
+    var hitArea = document.getElementById('chartHitArea');
+    var hoverLine = document.getElementById('chartHoverLine');
+    if (hitArea && hoverLine) {
+      hitArea.addEventListener('mousemove', function(e) {
+        var rect = svg.getBoundingClientRect();
+        var svgX = ((e.clientX - rect.left) / rect.width) * W;
+        var ratio = Math.max(0, Math.min(1, (svgX - pad.left) / plotW));
+        var idx = pts.length === 1 ? 0 : Math.round(ratio * (pts.length - 1));
+        var p = pts[idx];
+        var cx = xPos(idx);
+
+        hoverLine.setAttribute('x1', cx.toFixed(1));
+        hoverLine.setAttribute('x2', cx.toFixed(1));
+        hoverLine.setAttribute('visibility', 'visible');
+
+        var lines = visibleKeys.map(function(k) {
+          var raw = p.values[k];
+          if (typeof raw !== 'number') return '';
+          var colorIdx = (activeSeries.keys || []).indexOf(k);
+          var col = COLORS[(colorIdx >= 0 ? colorIdx : 0) % COLORS.length];
+          var b = baseByKey[k];
+          var pct = b ? (((raw - b) / b) * 100) : 0;
+          return '<div class="d-flex justify-content-between align-items-center gap-3">' +
+            '<span class="d-inline-flex align-items-center gap-1"><span style="width:8px;height:8px;border-radius:50%;background:' + col + ';display:inline-block;"></span>' + k + '</span>' +
+            '<span class="mono-num fw-semibold">' + raw.toFixed(2) + ' <span class="text-muted">(' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)</span></span>' +
+          '</div>';
+        }).filter(Boolean).join('');
+
+        tooltip.innerHTML = '<div class="fw-bold mono-num border-bottom pb-1 mb-1">' + p.month + '</div>' + lines;
+        tooltip.classList.remove('d-none');
+
+        var leftPx = (cx / W) * rect.width;
+        var tipW = tooltip.offsetWidth || 190;
+        var placeLeft = leftPx + 14 + tipW > rect.width ? leftPx - tipW - 14 : leftPx + 14;
+        tooltip.style.left = Math.max(8, placeLeft) + 'px';
+        tooltip.style.top = '12px';
+      });
+      hitArea.addEventListener('mouseleave', function() {
+        hoverLine.setAttribute('visibility', 'hidden');
+        tooltip.classList.add('d-none');
+      });
+    }
+  }
+
+  itemSel.addEventListener('change', function() {
+    var id = Number(itemSel.value);
+    activeSeries = SERIES.find(function(s) { return s.id === id; }) || SERIES[0];
+    hiddenKeys = {};
+    populateParams();
+    renderChart();
+  });
+
+  paramSel.addEventListener('change', renderChart);
+
+  populateParams();
+  renderChart();
+});
+</script>
 {% endblock %}

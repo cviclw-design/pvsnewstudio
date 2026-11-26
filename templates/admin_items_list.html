@@ -6,28 +6,32 @@
   <div>
     <h1 class="pvc-page-title">Items &amp; PVC Formulas</h1>
   </div>
-  {% if current_user.is_admin %}
-  <div class="d-flex flex-wrap gap-2">
+  <div class="d-flex flex-wrap align-items-center gap-2">
+    <input type="search" class="form-control form-control-sm" style="width: 210px;" placeholder="Filter items..." data-table-filter="#itemsMasterTable" aria-label="Filter items">
+    <a href="{{ url_for('admin.indices_bulk') }}" class="btn btn-outline-primary btn-sm">
+      <i class="bi bi-table me-1"></i>Bulk Indices Update
+    </a>
+    {% if current_user.is_admin %}
     <a href="{{ url_for('admin.items_new') }}" class="btn btn-primary btn-sm">
       <i class="bi bi-plus-circle me-1"></i>Add Item
     </a>
+    {% endif %}
   </div>
-  {% endif %}
 </div>
 
 {% if items %}
 <div class="card">
   <div class="card-body p-0">
     <div class="table-responsive">
-      <table class="table table-hover mb-0 align-middle">
+      <table class="table table-hover mb-0 align-middle" id="itemsMasterTable">
         <thead>
           <tr>
-            <th style="width: 60px;">ID</th>
-            <th>Item</th>
-            <th>Code</th>
-            <th>Formula</th>
-            <th class="text-center">Lag</th>
-            <th>Index Source</th>
+            <th style="width: 60px;" data-sort="num">ID</th>
+            <th data-sort="text">Item</th>
+            <th data-sort="text">Code</th>
+            <th data-sort="text">Formula</th>
+            <th class="text-center" data-sort="num">Lag</th>
+            <th data-sort="text">Index Source</th>
             <th class="text-end" style="width: 260px;">Actions</th>
           </tr>
         </thead>

@@ -254,6 +254,28 @@
     </div><!-- /.card-body (Date Details) -->
   </div><!-- /.card (Date Details) -->
 
+  <!-- Live Commercial & Timeline Preview -->
+  <div class="pvc-live-preview mb-3 d-none" id="calcLivePreview">
+    <div class="row g-3 align-items-center text-nowrap">
+      <div class="col-6 col-md-3">
+        <div class="pvc-section-label">Base Contract Value</div>
+        <div class="mono-num fw-bold fs-6 text-dark" id="liveBaseVal">₹0.00</div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="pvc-section-label">Freight Total</div>
+        <div class="mono-num fw-semibold fs-6 text-dark" id="liveFreightVal">₹0.00</div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="pvc-section-label">Est. Gross (incl. 18% GST)</div>
+        <div class="mono-num fw-bold fs-6 text-primary" id="liveGrossVal">₹0.00</div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="pvc-section-label">Delivery Schedule</div>
+        <div class="mono-num fw-semibold small" id="liveDelayStatus">—</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Submit -->
   <div class="d-flex justify-content-end gap-2 mb-4">
     <button type="submit" name="action" value="summary" class="btn btn-outline-secondary px-4">
@@ -690,6 +712,65 @@ document.addEventListener("DOMContentLoaded", () => {
     devChk.addEventListener("change", autoDetectRateApplied);
   }
 
+  function updateLivePreview() {
+    const preview = document.getElementById("calcLivePreview");
+    if (!preview) return;
+    const br = parseFloat(document.getElementById("basicrate")?.value || "") || 0;
+    const qty = parseFloat(document.getElementsByName("quantity")[0]?.value || "") || 0;
+    const frt = parseFloat(document.getElementById("freightrateperunit")?.value || "") || 0;
+    if (br <= 0) {
+      preview.classList.add("d-none");
+      return;
+    }
+    preview.classList.remove("d-none");
+    const baseTotal = br * qty;
+    const freightTotal = frt * qty;
+    const grossEst = (baseTotal + freightTotal) * 1.18;
+    const fmt = (n) => "₹" + n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    document.getElementById("liveBaseVal").textContent = fmt(baseTotal);
+    document.getElementById("liveFreightVal").textContent = fmt(freightTotal);
+    document.getElementById("liveGrossVal").textContent = fmt(grossEst);
+
+    const statusEl = document.getElementById("liveDelayStatus");
+    const sup = parseDateByName("supdate");
+    const dp = getLatestDPDate();
+    const ext = (document.getElementById("extendeddpchk")?.checked) ? parseDateByName("extendeddp") : null;
+    if (sup && dp) {
+      const refDp = (ext && ext > dp) ? ext : dp;
+      const diffDays = Math.floor((sup.getTime() - refDp.getTime()) / (1000 * 60 * 60 * 24));
+      if (diffDays <= 0) {
+        statusEl.textContent = "Within DP (No LD)";
+        statusEl.className = "mono-num fw-semibold small text-pvc-down";
+      } else {
+        const weeks = Math.ceil(diffDays / 7);
+        const ldPct = isDevelopmental() ? 0 : Math.min(10, weeks * 0.5);
+        statusEl.textContent = isDevelopmental()
+          ? `Delayed ${diffDays}d (LD Exempt)`
+          : `Delayed ${diffDays}d (${weeks}w · LD ${ldPct.toFixed(1)}%)`;
+        statusEl.className = "mono-num fw-semibold small text-pvc-up";
+      }
+    } else {
+      statusEl.textContent = "—";
+      statusEl.className = "mono-num fw-semibold small text-muted";
+    }
+  }
+
+  ["basicrate", "freightrateperunit"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("input", updateLivePreview);
+  });
+  ["quantity", "origdp", "refixeddp", "extendeddp", "supdate"].forEach(name => {
+    const el = document.getElementsByName(name)[0];
+    if (el) {
+      el.addEventListener("input", updateLivePreview);
+      el.addEventListener("change", updateLivePreview);
+    }
+  });
+  ["refixeddpchk", "extendeddpchk", "developmentaltender"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("change", updateLivePreview);
+  });
+
   // Initialise UI on page load
   toggleLowerRate();
   toggleTenderSection();
@@ -697,6 +778,7 @@ document.addEventListener("DOMContentLoaded", () => {
   toggleRefixedDP();
   toggleExtendedDP();
   autoDetectRateApplied();
+  updateLivePreview();
 
 });
 </script>

@@ -10,9 +10,41 @@ mainRouter.get('/', (_req, res) => {
   const items = store.getItems();
   const user = res.locals.current_user;
   const recentCalcs = user?.is_authenticated
-    ? (user.is_admin ? store.getPVCResults() : store.getPVCResults(user.id)).slice(0, 6)
+    ? (user.is_admin ? store.getPVCResults() : store.getPVCResults(user.id)).slice(0, 8)
     : [];
-  res.render('dashboard.html', { stats, items, recentCalcs });
+
+  // Chronological monthly index series per item (values only — never proof files)
+  const dashboardSeries = items.map((it) => {
+    const rows = store.getItemIndices(it.id, 'asc').slice(-18);
+    const paramSet = new Set<string>();
+    const points = rows.map((r) => {
+      let vals: Record<string, number> = {};
+      try {
+        const parsed = JSON.parse(r.indices_json || '{}') as Record<string, unknown>;
+        for (const [k, v] of Object.entries(parsed)) {
+          const num = Number(v);
+          if (Number.isFinite(num)) {
+            vals[k] = num;
+            paramSet.add(k);
+          }
+        }
+      } catch {
+        vals = {};
+      }
+      return { month: r.month.slice(0, 7), values: vals };
+    });
+    return {
+      id: it.id,
+      name: it.name,
+      code: it.code || '',
+      formula: it.pvc_formula_code || '',
+      source: it.index_source || 'IEEMA',
+      keys: Array.from(paramSet),
+      points,
+    };
+  });
+
+  res.render('dashboard.html', { stats, items, recentCalcs, dashboardSeries });
 });
 
 mainRouter.get('/history', requireLogin, (req, res) => {

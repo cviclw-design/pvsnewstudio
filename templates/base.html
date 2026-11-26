@@ -71,10 +71,22 @@
               History
             </a>
           </li>
-          <li class="nav-item">
-            <a class="nav-link text-nowrap {% if request.endpoint and 'admin.item' in request.endpoint %}active{% endif %}" href="{{ url_for('admin.items_list') }}">
+          <li class="nav-item dropdown">
+            <a class="nav-link text-nowrap dropdown-toggle {% if request.endpoint and ('admin.item' in request.endpoint or 'admin.indices_bulk' in request.endpoint) %}active{% endif %}" href="#" id="itemsDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
               Items &amp; Indices
             </a>
+            <ul class="dropdown-menu shadow-sm border" aria-labelledby="itemsDropdown">
+              <li>
+                <a class="dropdown-item" href="{{ url_for('admin.items_list') }}">
+                  <i class="bi bi-sliders me-2 text-muted"></i>Items &amp; Monthly Indices
+                </a>
+              </li>
+              <li>
+                <a class="dropdown-item" href="{{ url_for('admin.indices_bulk') }}">
+                  <i class="bi bi-table me-2 text-muted"></i>Bulk Indices Update
+                </a>
+              </li>
+            </ul>
           </li>
           <li class="nav-item">
             <a class="nav-link text-nowrap {% if request.endpoint and ('admin.tenders' in request.endpoint or 'admin.tender_vendors' in request.endpoint) %}active{% endif %}" href="{{ url_for('admin.tenders_list') }}">

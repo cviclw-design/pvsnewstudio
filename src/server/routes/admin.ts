@@ -4,9 +4,10 @@ import path from 'path';
 import express, { NextFunction, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
+import * as XLSX from 'xlsx';
 import { evaluateMathExpression, parseItemComponents, safeFloat } from '../pvcEngine.js';
 import { paginate, store } from '../store.js';
-import { ComponentConfig, IndexAttachment } from '../types.js';
+import { ComponentConfig, IndexAttachment, ItemRecord } from '../types.js';
 import { flashMessage, requireAdmin, requireLogin } from './auth.js';
 
 export const adminRouter = express.Router();
@@ -100,6 +101,185 @@ function nextMonthYYYYMM(monthStartIso: string | undefined): string {
     y += 1;
   }
   return `${y}-${String(mo).padStart(2, '0')}`;
+}
+
+const MONTH_NAME_MAP: Record<string, number> = {
+  jan: 1, january: 1,
+  feb: 2, february: 2,
+  mar: 3, march: 3,
+  apr: 4, april: 4,
+  may: 5,
+  jun: 6, june: 6,
+  jul: 7, july: 7,
+  aug: 8, august: 8,
+  sep: 9, sept: 9, september: 9,
+  oct: 10, october: 10,
+  nov: 11, november: 11,
+  dec: 12, december: 12,
+};
+
+function parseFlexibleMonthStart(raw: unknown): string | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  if (raw instanceof Date && !isNaN(raw.getTime())) {
+    return `${raw.getFullYear()}-${String(raw.getMonth() + 1).padStart(2, '0')}-01`;
+  }
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 20000 && raw < 80000) {
+    const dt = new Date(Math.round((raw - 25569) * 86400 * 1000));
+    if (!isNaN(dt.getTime())) {
+      const y = dt.getUTCFullYear();
+      const mo = dt.getUTCMonth() + 1;
+      if (y >= 1990 && y <= 2100 && mo >= 1 && mo <= 12) {
+        return `${y}-${String(mo).padStart(2, '0')}-01`;
+      }
+    }
+  }
+  const s = String(raw).trim();
+  if (!s) return null;
+
+  // YYYY-MM or YYYY-MM-DD or YYYY/MM or YYYY/MM/DD
+  const iso = /^(\d{4})[-/](\d{1,2})(?:[-/](\d{1,2}))?$/.exec(s);
+  if (iso) {
+    const y = Number(iso[1]);
+    const mo = Number(iso[2]);
+    if (y >= 1990 && y <= 2100 && mo >= 1 && mo <= 12) {
+      return `${y}-${String(mo).padStart(2, '0')}-01`;
+    }
+  }
+
+  // MM/YYYY or MM-YYYY
+  const mmyyyy = /^(\d{1,2})[-/](\d{4})$/.exec(s);
+  if (mmyyyy) {
+    const mo = Number(mmyyyy[1]);
+    const y = Number(mmyyyy[2]);
+    if (y >= 1990 && y <= 2100 && mo >= 1 && mo <= 12) {
+      return `${y}-${String(mo).padStart(2, '0')}-01`;
+    }
+  }
+
+  // DD/MM/YYYY or DD-MM-YYYY
+  const dmy = /^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/.exec(s);
+  if (dmy) {
+    const mo = Number(dmy[2]);
+    const y = Number(dmy[3]);
+    if (y >= 1990 && y <= 2100 && mo >= 1 && mo <= 12) {
+      return `${y}-${String(mo).padStart(2, '0')}-01`;
+    }
+  }
+
+  // Jan-2025, Jan 2025, January 2025, Jan-25
+  const monFirst = /^([A-Za-z]+)[\s\-/]+(\d{2,4})$/.exec(s);
+  if (monFirst) {
+    const mo = MONTH_NAME_MAP[monFirst[1].toLowerCase()];
+    let y = Number(monFirst[2]);
+    if (y < 100) y += 2000;
+    if (mo && y >= 1990 && y <= 2100) {
+      return `${y}-${String(mo).padStart(2, '0')}-01`;
+    }
+  }
+
+  // 2025-Jan, 2025 Jan
+  const yrFirst = /^(\d{4})[\s\-/]+([A-Za-z]+)$/.exec(s);
+  if (yrFirst) {
+    const y = Number(yrFirst[1]);
+    const mo = MONTH_NAME_MAP[yrFirst[2].toLowerCase()];
+    if (mo && y >= 1990 && y <= 2100) {
+      return `${y}-${String(mo).padStart(2, '0')}-01`;
+    }
+  }
+
+  return null;
+}
+
+function getItemExpectedKeys(item: ItemRecord): { keys: string[]; labels: Record<string, string> } {
+  let parsedWeights: Record<string, number> = {};
+  try {
+    parsedWeights = JSON.parse(item.weights_json || '{}');
+  } catch {
+    parsedWeights = {};
+  }
+  const components = parseItemComponents(item, parsedWeights);
+  const keySet = new Set<string>();
+  const labels: Record<string, string> = {};
+
+  for (const c of components) {
+    if (!c.key || c.key.toUpperCase() === 'FIXED') continue;
+    keySet.add(c.key);
+    labels[c.key] = c.label || c.key;
+  }
+
+  if ((item.pvc_formula_code || '').toUpperCase().includes('IGBT')) {
+    for (const extra of ['D', 'ER_EUR', 'ER_USD', 'ER_JPY']) {
+      keySet.add(extra);
+    }
+    labels.D = labels.D || 'Customs Duty (%)';
+    labels.ER_EUR = labels.ER_EUR || 'Exchange Rate EUR';
+    labels.ER_USD = labels.ER_USD || 'Exchange Rate USD';
+    labels.ER_JPY = labels.ER_JPY || 'Exchange Rate JPY';
+  }
+
+  // Include keys present in existing index rows so nothing is lost
+  const existing = store.getItemIndices(item.id, 'desc').slice(0, 12);
+  for (const r of existing) {
+    try {
+      const obj = JSON.parse(r.indices_json || '{}') as Record<string, unknown>;
+      for (const k of Object.keys(obj)) {
+        if (k && k.toUpperCase() !== 'FIXED') {
+          keySet.add(k);
+          if (!labels[k]) labels[k] = k;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  if (keySet.size === 0) {
+    keySet.add('C');
+    labels.C = 'Copper';
+  }
+
+  return { keys: Array.from(keySet), labels };
+}
+
+const bulkSheetUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+});
+
+function handleBulkSheetUpload(req: Request, res: Response, next: NextFunction): void {
+  bulkSheetUpload.single('bulk_file')(req, res, (err: unknown) => {
+    if (err) {
+      flashMessage(req, err instanceof Error ? err.message : 'File upload failed.', 'danger');
+      res.redirect('/admin/indices/bulk');
+      return;
+    }
+    next();
+  });
+}
+
+function upsertMonthlyIndexValues(
+  itemId: number,
+  monthStart: string,
+  values: Record<string, number>,
+  mergeMode: boolean,
+  userId: number
+): 'created' | 'updated' {
+  const existing = store.getItemIndexByMonth(itemId, monthStart);
+  if (existing) {
+    let nextObj: Record<string, number> = { ...values };
+    if (mergeMode) {
+      try {
+        const prevObj = JSON.parse(existing.indices_json || '{}') as Record<string, number>;
+        nextObj = { ...prevObj, ...values };
+      } catch {
+        nextObj = { ...values };
+      }
+    }
+    store.updateItemIndex(itemId, existing.id, { month: monthStart, indices_json: JSON.stringify(nextObj) }, userId);
+    return 'updated';
+  }
+  store.createItemIndex({ item_id: itemId, month: monthStart, indices_json: JSON.stringify(values), attachments: [] }, userId);
+  return 'created';
 }
 
 // ── Items ─────────────────────────────────────────────────────────────────
@@ -528,6 +708,312 @@ adminRouter.post('/items/:itemid/indices/:rowid/delete', (req, res) => {
   store.deleteItemIndex(itemId, rowId, res.locals.current_user.id);
   flashMessage(req, 'Index row deleted.', 'success');
   res.redirect(`/admin/items/${itemId}/indices`);
+});
+
+// ── Bulk Monthly Indices Update ───────────────────────────────────────────
+
+adminRouter.get('/indices/bulk', (req, res) => {
+  res.locals.request.endpoint = 'admin.indices_bulk';
+  const items = store.getItems();
+  const reqItemId = parseInt(String(req.query.itemid || ''), 10);
+  const selectedItemId = items.some((it) => it.id === reqItemId) ? reqItemId : items[0]?.id ?? null;
+
+  const itemsMeta = items.map((it) => {
+    const { keys, labels } = getItemExpectedKeys(it);
+    const rows = store.getItemIndices(it.id, 'desc');
+    const existingMonths = rows.map((r) => {
+      let values: Record<string, number> = {};
+      try {
+        values = JSON.parse(r.indices_json || '{}');
+      } catch {
+        values = {};
+      }
+      return {
+        id: r.id,
+        month: r.month.slice(0, 7),
+        values,
+      };
+    });
+    return {
+      id: it.id,
+      name: it.name,
+      code: it.code || '',
+      formula: it.pvc_formula_code || '',
+      source: it.index_source || 'IEEMA',
+      keys,
+      labels,
+      existingMonths,
+      nextMonth: nextMonthYYYYMM(rows[0]?.month),
+    };
+  });
+
+  const now = new Date();
+  const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+  res.render('admin_indices_bulk.html', {
+    items,
+    selectedItemId,
+    itemsMeta,
+    defaultMonth,
+  });
+});
+
+adminRouter.get('/indices/bulk/template', (req, res) => {
+  const itemId = parseInt(String(req.query.itemid || ''), 10);
+  const item = store.getItemById(itemId) || store.getItems()[0];
+  if (!item) {
+    res.status(404).send('No item configured');
+    return;
+  }
+  const { keys } = getItemExpectedKeys(item);
+  const existing = store.getItemIndices(item.id, 'asc').slice(-12);
+
+  const sheetRows: Array<Record<string, string | number>> = [];
+  if (existing.length > 0) {
+    for (const r of existing) {
+      let vals: Record<string, unknown> = {};
+      try {
+        vals = JSON.parse(r.indices_json || '{}');
+      } catch {
+        vals = {};
+      }
+      const rowObj: Record<string, string | number> = { Month: r.month.slice(0, 7) };
+      for (const k of keys) {
+        const n = Number(vals[k]);
+        rowObj[k] = Number.isFinite(n) ? n : '';
+      }
+      sheetRows.push(rowObj);
+    }
+  } else {
+    const sampleRow: Record<string, string | number> = { Month: nextMonthYYYYMM(undefined) };
+    for (const k of keys) sampleRow[k] = 100;
+    sheetRows.push(sampleRow);
+  }
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(sheetRows, { header: ['Month', ...keys] });
+  XLSX.utils.book_append_sheet(wb, ws, 'MonthlyIndices');
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+  const safeSlug = (item.code || item.name || `item_${item.id}`).replace(/[^a-zA-Z0-9_-]+/g, '_');
+
+  res.setHeader('Content-Disposition', `attachment; filename="indices_template_${safeSlug}.xlsx"`);
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.send(buf);
+});
+
+adminRouter.post('/indices/bulk/save', (req, res) => {
+  const itemId = parseInt(String(req.body.itemid || ''), 10);
+  const item = store.getItemById(itemId);
+  if (!item) {
+    flashMessage(req, 'Please select a valid item.', 'danger');
+    res.redirect('/admin/indices/bulk');
+    return;
+  }
+
+  const mergeMode = String(req.body.merge_mode || 'merge') !== 'replace';
+  const rawRowsStr = String(req.body.rows_json || '').trim();
+  let parsedRows: Array<{ month?: unknown; values?: Record<string, unknown> }> = [];
+  try {
+    const raw = JSON.parse(rawRowsStr);
+    if (!Array.isArray(raw)) throw new Error('Not array');
+    parsedRows = raw;
+  } catch {
+    flashMessage(req, 'Invalid bulk indices payload.', 'danger');
+    res.redirect(`/admin/indices/bulk?itemid=${item.id}`);
+    return;
+  }
+
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+  const userId = res.locals.current_user.id;
+
+  for (const row of parsedRows) {
+    const monthStart = parseFlexibleMonthStart(row?.month);
+    if (!monthStart) {
+      skipped += 1;
+      continue;
+    }
+    const cleanValues: Record<string, number> = {};
+    for (const [k, v] of Object.entries(row?.values || {})) {
+      const key = String(k || '').trim();
+      if (!key || key.toUpperCase() === 'FIXED') continue;
+      if (v === '' || v === null || v === undefined) continue;
+      const num = Number(v);
+      if (Number.isFinite(num)) {
+        cleanValues[key] = num;
+      }
+    }
+    if (Object.keys(cleanValues).length === 0) {
+      skipped += 1;
+      continue;
+    }
+    const status = upsertMonthlyIndexValues(item.id, monthStart, cleanValues, mergeMode, userId);
+    if (status === 'created') created += 1;
+    else updated += 1;
+  }
+
+  if (created === 0 && updated === 0) {
+    flashMessage(req, 'No valid monthly index rows found to save.', 'warning');
+    res.redirect(`/admin/indices/bulk?itemid=${item.id}`);
+    return;
+  }
+
+  const parts = [];
+  if (created > 0) parts.push(`${created} month(s) created`);
+  if (updated > 0) parts.push(`${updated} month(s) updated`);
+  if (skipped > 0) parts.push(`${skipped} skipped`);
+  flashMessage(req, `Bulk update for ${item.name}: ${parts.join(', ')}.`, 'success');
+  res.redirect(`/admin/items/${item.id}/indices`);
+});
+
+adminRouter.post('/indices/bulk/upload', handleBulkSheetUpload, (req, res) => {
+  const itemId = parseInt(String(req.body.itemid || ''), 10);
+  const item = store.getItemById(itemId);
+  if (!item) {
+    flashMessage(req, 'Please select a valid item.', 'danger');
+    res.redirect('/admin/indices/bulk');
+    return;
+  }
+  const file = req.file;
+  if (!file || !file.buffer) {
+    flashMessage(req, 'Please choose an Excel (.xlsx / .xls) or CSV file.', 'danger');
+    res.redirect(`/admin/indices/bulk?itemid=${item.id}`);
+    return;
+  }
+
+  const mergeMode = String(req.body.merge_mode || 'merge') !== 'replace';
+  const userId = res.locals.current_user.id;
+
+  try {
+    const wb = XLSX.read(file.buffer, { type: 'buffer', cellDates: false });
+    const firstSheetName = wb.SheetNames[0];
+    if (!firstSheetName) {
+      flashMessage(req, 'Uploaded file contains no sheets.', 'danger');
+      res.redirect(`/admin/indices/bulk?itemid=${item.id}`);
+      return;
+    }
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[firstSheetName], { defval: '' });
+    if (!rows.length) {
+      flashMessage(req, 'Uploaded sheet has no data rows.', 'warning');
+      res.redirect(`/admin/indices/bulk?itemid=${item.id}`);
+      return;
+    }
+
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    for (const rawRow of rows) {
+      let monthKey: string | null = null;
+      for (const col of Object.keys(rawRow)) {
+        const lower = col.trim().toLowerCase();
+        if (lower === 'month' || lower === 'date' || lower === 'period' || lower === 'year-month' || lower === 'yyyy-mm') {
+          monthKey = col;
+          break;
+        }
+      }
+      if (!monthKey) {
+        monthKey = Object.keys(rawRow)[0] || null;
+      }
+      const monthStart = monthKey ? parseFlexibleMonthStart(rawRow[monthKey]) : null;
+      if (!monthStart) {
+        skipped += 1;
+        continue;
+      }
+
+      const cleanValues: Record<string, number> = {};
+      for (const [col, val] of Object.entries(rawRow)) {
+        if (col === monthKey) continue;
+        const key = col.trim();
+        if (!key || key.toUpperCase() === 'FIXED' || key.startsWith('__EMPTY')) continue;
+        if (val === '' || val === null || val === undefined) continue;
+        const num = Number(String(val).replace(/,/g, '').trim());
+        if (Number.isFinite(num)) {
+          cleanValues[key] = num;
+        }
+      }
+
+      if (Object.keys(cleanValues).length === 0) {
+        skipped += 1;
+        continue;
+      }
+
+      const status = upsertMonthlyIndexValues(item.id, monthStart, cleanValues, mergeMode, userId);
+      if (status === 'created') created += 1;
+      else updated += 1;
+    }
+
+    if (created === 0 && updated === 0) {
+      flashMessage(req, 'No valid month rows found in uploaded file.', 'warning');
+      res.redirect(`/admin/indices/bulk?itemid=${item.id}`);
+      return;
+    }
+
+    const parts = [];
+    if (created > 0) parts.push(`${created} created`);
+    if (updated > 0) parts.push(`${updated} updated`);
+    if (skipped > 0) parts.push(`${skipped} skipped`);
+    flashMessage(req, `Imported ${file.originalname} for ${item.name}: ${parts.join(', ')}.`, 'success');
+    res.redirect(`/admin/items/${item.id}/indices`);
+  } catch (err) {
+    flashMessage(req, `Failed to parse file: ${err instanceof Error ? err.message : 'Unknown error'}`, 'danger');
+    res.redirect(`/admin/indices/bulk?itemid=${item.id}`);
+  }
+});
+
+adminRouter.post('/indices/bulk/month', (req, res) => {
+  const monthStart = parseFlexibleMonthStart(req.body.month);
+  if (!monthStart) {
+    flashMessage(req, 'Please select a valid month (YYYY-MM).', 'danger');
+    res.redirect('/admin/indices/bulk');
+    return;
+  }
+
+  let itemsPayload: Array<{ itemid?: unknown; values?: Record<string, unknown> }> = [];
+  try {
+    const raw = JSON.parse(String(req.body.items_payload_json || '[]'));
+    if (!Array.isArray(raw)) throw new Error('Invalid payload');
+    itemsPayload = raw;
+  } catch {
+    flashMessage(req, 'Invalid multi-item update payload.', 'danger');
+    res.redirect('/admin/indices/bulk');
+    return;
+  }
+
+  let created = 0;
+  let updated = 0;
+  const userId = res.locals.current_user.id;
+
+  for (const entry of itemsPayload) {
+    const itemId = Number(entry?.itemid);
+    if (!Number.isFinite(itemId) || !store.getItemById(itemId)) continue;
+    const cleanValues: Record<string, number> = {};
+    for (const [k, v] of Object.entries(entry?.values || {})) {
+      const key = String(k || '').trim();
+      if (!key || key.toUpperCase() === 'FIXED') continue;
+      if (v === '' || v === null || v === undefined) continue;
+      const num = Number(v);
+      if (Number.isFinite(num)) cleanValues[key] = num;
+    }
+    if (Object.keys(cleanValues).length === 0) continue;
+    const status = upsertMonthlyIndexValues(itemId, monthStart, cleanValues, true, userId);
+    if (status === 'created') created += 1;
+    else updated += 1;
+  }
+
+  if (created === 0 && updated === 0) {
+    flashMessage(req, 'No items selected or no valid values provided.', 'warning');
+    res.redirect('/admin/indices/bulk');
+    return;
+  }
+
+  flashMessage(
+    req,
+    `Month ${monthStart.slice(0, 7)} updated across ${created + updated} item(s) (${created} created, ${updated} updated).`,
+    'success'
+  );
+  res.redirect('/admin/indices/bulk');
 });
 
 // ── Tenders ───────────────────────────────────────────────────────────────

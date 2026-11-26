@@ -7,8 +7,9 @@
     <div class="pvc-section-label">Contract Master</div>
     <h1 class="pvc-page-title">Tenders</h1>
   </div>
-  <div class="d-flex flex-wrap gap-2">
-    <a href="{{ url_for('admin.tenders_new') }}" class="btn btn-primary">
+  <div class="d-flex flex-wrap align-items-center gap-2">
+    <input type="search" class="form-control form-control-sm" style="width: 210px;" placeholder="Filter tenders..." data-table-filter="#tendersTable" aria-label="Filter tenders">
+    <a href="{{ url_for('admin.tenders_new') }}" class="btn btn-primary btn-sm">
       <i class="bi bi-plus-circle me-1"></i>Add Tender
     </a>
   </div>
@@ -18,15 +19,15 @@
 <div class="card">
   <div class="card-body p-0">
     <div class="table-responsive">
-      <table class="table table-hover mb-0 align-middle">
+      <table class="table table-hover mb-0 align-middle" id="tendersTable">
         <thead>
           <tr>
-            <th style="width: 70px;">ID</th>
-            <th>Tender No</th>
-            <th>Item</th>
-            <th class="text-end">Basic Rate (₹)</th>
-            <th class="text-center">PVC Base Date</th>
-            <th class="text-center">Vendors</th>
+            <th style="width: 70px;" data-sort="num">ID</th>
+            <th data-sort="text">Tender No</th>
+            <th data-sort="text">Item</th>
+            <th class="text-end" data-sort="num">Basic Rate (₹)</th>
+            <th class="text-center" data-sort="text">PVC Base Date</th>
+            <th class="text-center" data-sort="num">Vendors</th>
             <th class="text-end" style="width: 240px;">Actions</th>
           </tr>
         </thead>

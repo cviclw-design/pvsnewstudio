@@ -59,6 +59,22 @@ export function buildUrlFor(endpoint: string, params: Record<string, unknown> = 
       return `/admin/items/${params.itemid}/indices/${params.rowid}/delete`;
     case 'admin.item_indices_attachment_delete':
       return `/admin/items/${params.itemid}/indices/${params.rowid}/attachments/${params.attid}/delete`;
+    case 'admin.indices_bulk':
+      if (params.itemid !== undefined && params.itemid !== null && params.itemid !== '') {
+        q.set('itemid', String(params.itemid));
+      }
+      return withQuery('/admin/indices/bulk');
+    case 'admin.indices_bulk_save':
+      return '/admin/indices/bulk/save';
+    case 'admin.indices_bulk_upload':
+      return '/admin/indices/bulk/upload';
+    case 'admin.indices_bulk_template':
+      if (params.itemid !== undefined && params.itemid !== null && params.itemid !== '') {
+        q.set('itemid', String(params.itemid));
+      }
+      return withQuery('/admin/indices/bulk/template');
+    case 'admin.indices_bulk_month_save':
+      return '/admin/indices/bulk/month';
     case 'admin.tenders_list':
       return '/admin/tenders';
     case 'admin.tenders_new':
@@ -85,6 +101,11 @@ export function buildUrlFor(endpoint: string, params: Record<string, unknown> = 
       return `/admin/users/${params.userid}/delete`;
     case 'admin.users_reset_password':
       return `/admin/users/${params.userid}/reset_password`;
+    case 'admin.calculations_list':
+      addPage();
+      return withQuery('/admin/calculations');
+    case 'admin.calculations_delete':
+      return `/admin/calculations/${params.calcid}/delete`;
     case 'admin.audit_logs_list':
       return '/admin/audit_logs';
     case 'admin.backup_now':

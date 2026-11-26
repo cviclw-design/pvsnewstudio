@@ -1,0 +1,616 @@
+{% extends "base.html" %}
+{% block title %}Bulk Monthly Indices Update — PVC Calculation Studio{% endblock %}
+
+{% block content %}
+<div class="pvc-page-header">
+  <div>
+    <div class="pvc-section-label">Monthly Indices</div>
+    <h1 class="pvc-page-title">Bulk Monthly Indices Update</h1>
+  </div>
+  <div class="d-flex flex-wrap gap-2">
+    <a href="{{ url_for('admin.items_list') }}" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-arrow-left me-1"></i>Items
+    </a>
+  </div>
+</div>
+
+{% if items and items | length > 0 %}
+<!-- Interactive Mode Switcher -->
+<ul class="nav nav-tabs mb-4" id="bulkModeTabs" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active" id="tab-grid-btn" data-bs-toggle="tab" data-bs-target="#pane-grid" type="button" role="tab">
+      <i class="bi bi-table me-1"></i>Spreadsheet Grid
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-excel-btn" data-bs-toggle="tab" data-bs-target="#pane-excel" type="button" role="tab">
+      <i class="bi bi-file-earmark-spreadsheet me-1"></i>Excel / CSV Import
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-multi-btn" data-bs-toggle="tab" data-bs-target="#pane-multi" type="button" role="tab">
+      <i class="bi bi-layers me-1"></i>Multi-Item Single Month
+    </button>
+  </li>
+</ul>
+
+<div class="tab-content" id="bulkModeContent">
+
+  <!-- ═══ TAB 1: INTERACTIVE SPREADSHEET GRID ═══ -->
+  <div class="tab-pane fade show active" id="pane-grid" role="tabpanel">
+    <form id="bulkGridForm" method="post" action="{{ url_for('admin.indices_bulk_save') }}">
+      <input type="hidden" name="rows_json" id="bulkRowsJson" value="[]">
+
+      <div class="card">
+        <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-3">
+          <div class="d-flex flex-wrap align-items-center gap-3">
+            <div>
+              <label class="form-label mb-1 small" for="gridItemSelect">Item</label>
+              <select id="gridItemSelect" name="itemid" class="form-select form-select-sm" style="min-width: 260px;">
+                {% for it in items %}
+                <option value="{{ it.id }}" {% if it.id == selectedItemId %}selected{% endif %}>
+                  {{ it.name }}{% if it.code %} ({{ it.code }}){% endif %}
+                </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div>
+              <label class="form-label mb-1 small" for="gridMergeMode">Existing Months</label>
+              <select id="gridMergeMode" name="merge_mode" class="form-select form-select-sm">
+                <option value="merge" selected>Merge Parameters</option>
+                <option value="replace">Replace Row</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="d-flex flex-wrap align-items-center gap-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnLoadExisting">
+              <i class="bi bi-arrow-clockwise me-1"></i>Load Existing
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="btnAdd1Month">
+              <i class="bi bi-plus-lg me-1"></i>+1 Month
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="btnAdd6Months">
+              +6 Months
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnOpenPasteModal">
+              <i class="bi bi-clipboard-plus me-1"></i>Paste Sheet
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnClearGrid">
+              Clear
+            </button>
+          </div>
+        </div>
+
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-bordered table-sm mb-0 align-middle bulk-grid-table" id="bulkGridTable">
+              <thead id="bulkGridHead"></thead>
+              <tbody id="bulkGridBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card-footer bg-white d-flex flex-wrap justify-content-between align-items-center gap-3 py-3">
+          <div class="small mono-num d-flex flex-wrap align-items-center gap-3" id="gridSummaryBar">
+            <span class="text-muted">Rows: <strong class="text-dark" id="sumTotal">0</strong></span>
+            <span class="text-success">New: <strong id="sumNew">0</strong></span>
+            <span class="text-primary">Update: <strong id="sumUpdate">0</strong></span>
+            <span class="text-danger d-none" id="sumDupWrap">Duplicates: <strong id="sumDup">0</strong></span>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <a id="gridViewItemLink" href="{{ url_for('admin.item_indices_list', itemid=selectedItemId) }}" class="btn btn-sm btn-outline-secondary">
+              View Item Indices
+            </a>
+            <button type="submit" class="btn btn-primary btn-sm px-4" id="btnSaveBulkGrid">
+              <i class="bi bi-check2-all me-1"></i>Save All Months
+            </button>
+          </div>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <!-- ═══ TAB 2: EXCEL / CSV IMPORT ═══ -->
+  <div class="tab-pane fade" id="pane-excel" role="tabpanel">
+    <form method="post" action="{{ url_for('admin.indices_bulk_upload') }}" enctype="multipart/form-data">
+      <div class="card">
+        <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <h6 class="fw-bold mb-0"><i class="bi bi-file-earmark-arrow-up me-2 text-primary"></i>Excel / CSV Batch Upload</h6>
+          <a id="excelTemplateLink" href="{{ url_for('admin.indices_bulk_template', itemid=selectedItemId) }}" class="btn btn-sm btn-outline-primary">
+            <i class="bi bi-download me-1"></i>Download Item Template (.xlsx)
+          </a>
+        </div>
+        <div class="card-body">
+          <div class="row g-3 mb-4">
+            <div class="col-md-6">
+              <label class="form-label" for="excelItemSelect">Item</label>
+              <select id="excelItemSelect" name="itemid" class="form-select" required>
+                {% for it in items %}
+                <option value="{{ it.id }}" {% if it.id == selectedItemId %}selected{% endif %}>
+                  {{ it.name }}{% if it.code %} ({{ it.code }}){% endif %}
+                </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="excelMergeMode">Existing Months</label>
+              <select id="excelMergeMode" name="merge_mode" class="form-select">
+                <option value="merge" selected>Merge Parameters</option>
+                <option value="replace">Replace Row</option>
+              </select>
+            </div>
+          </div>
+
+          <label
+            for="bulkFileInput"
+            id="bulkDropZone"
+            class="w-100 p-5 rounded border border-2 text-center bg-light bulk-dropzone"
+            style="border-style: dashed !important; border-color: #cbd5e1 !important; cursor: pointer;"
+          >
+            <i class="bi bi-file-earmark-spreadsheet fs-1 text-primary d-block mb-2"></i>
+            <div class="fw-semibold text-dark mb-1" id="bulkFileTitle">Choose or Drop Excel / CSV File</div>
+            <div class="mono-num small text-muted" id="bulkFileMeta">.xlsx, .xls, .csv</div>
+            <input id="bulkFileInput" type="file" name="bulk_file" class="d-none" accept=".xlsx,.xls,.csv" required>
+          </label>
+
+          <div class="d-flex justify-content-end mt-4 pt-3 border-top">
+            <button type="submit" class="btn btn-primary px-4">
+              <i class="bi bi-cloud-upload me-1"></i>Import &amp; Update Indices
+            </button>
+          </div>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <!-- ═══ TAB 3: MULTI-ITEM SINGLE MONTH UPDATE ═══ -->
+  <div class="tab-pane fade" id="pane-multi" role="tabpanel">
+    <form id="multiMonthForm" method="post" action="{{ url_for('admin.indices_bulk_month_save') }}">
+      <input type="hidden" name="items_payload_json" id="multiItemsPayload" value="[]">
+
+      <div class="card">
+        <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-3">
+          <div class="d-flex align-items-center gap-3">
+            <div>
+              <label class="form-label mb-1 small" for="multiMonthInput">Target Month</label>
+              <input id="multiMonthInput" type="month" name="month" class="form-control form-control-sm mono-num" value="{{ defaultMonth }}" required>
+            </div>
+          </div>
+          <div class="small mono-num text-muted">
+            Selected Items: <strong class="text-dark" id="multiSelectedCount">0</strong>
+          </div>
+        </div>
+        <div class="card-body d-flex flex-column gap-3" id="multiItemsContainer"></div>
+        <div class="card-footer bg-white d-flex justify-content-end py-3">
+          <button type="submit" class="btn btn-primary btn-sm px-4">
+            <i class="bi bi-check2-all me-1"></i>Save Month Across Selected Items
+          </button>
+        </div>
+      </div>
+    </form>
+  </div>
+
+</div>
+
+<!-- Paste from Excel / CSV Modal -->
+<div class="modal fade" id="pasteSheetModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content border-0 shadow">
+      <div class="modal-header bg-white border-bottom">
+        <h6 class="modal-title fw-bold mb-0"><i class="bi bi-clipboard-data me-2 text-primary"></i>Paste Rows from Excel / CSV</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="small mono-num text-muted mb-2" id="pasteColumnOrder"></div>
+        <textarea id="pasteRawArea" class="form-control mono-num small" rows="8" placeholder="2025-07&#9;125.4&#9;118.2&#9;142.0"></textarea>
+      </div>
+      <div class="modal-footer bg-light border-top">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-sm btn-primary" id="btnApplyPaste">
+          <i class="bi bi-check2 me-1"></i>Apply to Grid
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% else %}
+<div class="card">
+  <div class="card-body text-center py-5 text-muted">No items configured.</div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extrajs %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  var ITEMS_META = {{ itemsMeta | tojson if itemsMeta else '[]' }};
+  if (!Array.isArray(ITEMS_META) || ITEMS_META.length === 0) return;
+
+  var metaById = {};
+  ITEMS_META.forEach(function(m) { metaById[String(m.id)] = m; });
+
+  var gridItemSelect = document.getElementById('gridItemSelect');
+  var excelItemSelect = document.getElementById('excelItemSelect');
+  var excelTemplateLink = document.getElementById('excelTemplateLink');
+  var gridViewItemLink = document.getElementById('gridViewItemLink');
+  var gridHead = document.getElementById('bulkGridHead');
+  var gridBody = document.getElementById('bulkGridBody');
+  var bulkRowsJson = document.getElementById('bulkRowsJson');
+  var bulkGridForm = document.getElementById('bulkGridForm');
+
+  var currentMeta = metaById[String(gridItemSelect.value)] || ITEMS_META[0];
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function nextMonthStr(ym) {
+    var m = /^(\d{4})-(\d{2})$/.exec(String(ym || '').trim());
+    if (!m) {
+      var d = new Date();
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    }
+    var y = parseInt(m[1], 10);
+    var mo = parseInt(m[2], 10) + 1;
+    if (mo > 12) { mo = 1; y += 1; }
+    return y + '-' + String(mo).padStart(2, '0');
+  }
+
+  function getExistingMonthMap(meta) {
+    var map = {};
+    (meta.existingMonths || []).forEach(function(r) { map[r.month] = r.values || {}; });
+    return map;
+  }
+
+  function renderGridHeader() {
+    var cols = '<th style="width: 145px;">Month</th><th style="width: 82px;" class="text-center">Status</th>';
+    currentMeta.keys.forEach(function(k) {
+      var lbl = (currentMeta.labels && currentMeta.labels[k]) || k;
+      cols += '<th class="text-end mono-num">' + escapeHtml(k) +
+        (lbl !== k ? '<div class="fw-normal text-muted" style="font-size:10px;text-transform:none;">' + escapeHtml(lbl) + '</div>' : '') +
+        '</th>';
+    });
+    cols += '<th style="width: 84px;" class="text-center">Action</th>';
+    gridHead.innerHTML = '<tr>' + cols + '</tr>';
+  }
+
+  function buildGridRow(monthVal, valuesObj) {
+    var tr = document.createElement('tr');
+    var html =
+      '<td><input type="month" class="form-control form-control-sm mono-num grid-month" value="' + escapeHtml(monthVal || '') + '" required></td>' +
+      '<td class="text-center small mono-num grid-status"></td>';
+    currentMeta.keys.forEach(function(k) {
+      var v = valuesObj && valuesObj[k] !== undefined && valuesObj[k] !== null ? valuesObj[k] : '';
+      html += '<td><input type="number" step="any" class="form-control form-control-sm text-end mono-num grid-val" data-key="' + escapeHtml(k) + '" value="' + escapeHtml(v) + '"></td>';
+    });
+    html +=
+      '<td class="text-center text-nowrap">' +
+        '<button type="button" class="btn btn-sm btn-outline-secondary me-1 grid-dup" title="Duplicate Next Month"><i class="bi bi-files"></i></button>' +
+        '<button type="button" class="btn btn-sm btn-outline-danger grid-del" title="Remove"><i class="bi bi-x-lg"></i></button>' +
+      '</td>';
+    tr.innerHTML = html;
+
+    tr.querySelector('.grid-month').addEventListener('input', refreshGridSummary);
+    tr.querySelectorAll('.grid-val').forEach(function(inp) {
+      inp.addEventListener('input', refreshGridSummary);
+    });
+    tr.querySelector('.grid-del').addEventListener('click', function() {
+      tr.remove();
+      refreshGridSummary();
+    });
+    tr.querySelector('.grid-dup').addEventListener('click', function() {
+      var curMonth = tr.querySelector('.grid-month').value;
+      var vals = {};
+      tr.querySelectorAll('.grid-val').forEach(function(inp) {
+        if (inp.value !== '') vals[inp.getAttribute('data-key')] = inp.value;
+      });
+      var newTr = buildGridRow(nextMonthStr(curMonth), vals);
+      tr.insertAdjacentElement('afterend', newTr);
+      refreshGridSummary();
+    });
+
+    return tr;
+  }
+
+  function getLastRowData() {
+    var rows = gridBody.querySelectorAll('tr');
+    if (!rows.length) {
+      var latest = currentMeta.existingMonths && currentMeta.existingMonths[0];
+      return {
+        month: latest ? latest.month : null,
+        values: latest ? latest.values : {},
+      };
+    }
+    var last = rows[rows.length - 1];
+    var vals = {};
+    last.querySelectorAll('.grid-val').forEach(function(inp) {
+      if (inp.value !== '') vals[inp.getAttribute('data-key')] = inp.value;
+    });
+    return { month: last.querySelector('.grid-month').value, values: vals };
+  }
+
+  function refreshGridSummary() {
+    var existingMap = getExistingMonthMap(currentMeta);
+    var rows = Array.from(gridBody.querySelectorAll('tr'));
+    var seen = {};
+    var nNew = 0, nUpd = 0, nDup = 0;
+
+    rows.forEach(function(tr) {
+      var mo = (tr.querySelector('.grid-month').value || '').trim();
+      if (mo) seen[mo] = (seen[mo] || 0) + 1;
+    });
+
+    rows.forEach(function(tr) {
+      var mo = (tr.querySelector('.grid-month').value || '').trim();
+      var stEl = tr.querySelector('.grid-status');
+      tr.classList.remove('table-warning', 'table-danger');
+      if (!mo) {
+        stEl.innerHTML = '<span class="text-muted">—</span>';
+      } else if (seen[mo] > 1) {
+        nDup += 1;
+        tr.classList.add('table-danger');
+        stEl.innerHTML = '<span class="text-danger fw-semibold">Dup</span>';
+      } else if (existingMap[mo]) {
+        nUpd += 1;
+        stEl.innerHTML = '<span class="text-primary fw-semibold">Update</span>';
+      } else {
+        nNew += 1;
+        stEl.innerHTML = '<span class="text-success fw-semibold">New</span>';
+      }
+    });
+
+    document.getElementById('sumTotal').textContent = String(rows.length);
+    document.getElementById('sumNew').textContent = String(nNew);
+    document.getElementById('sumUpdate').textContent = String(nUpd);
+    document.getElementById('sumDup').textContent = String(nDup);
+    document.getElementById('sumDupWrap').classList.toggle('d-none', nDup === 0);
+  }
+
+  function loadItemGrid(loadExisting) {
+    renderGridHeader();
+    gridBody.innerHTML = '';
+    if (gridViewItemLink) {
+      gridViewItemLink.href = '/admin/items/' + currentMeta.id + '/indices';
+    }
+    var existing = (currentMeta.existingMonths || []).slice(0, 12).reverse();
+    if (loadExisting && existing.length > 0) {
+      existing.forEach(function(r) {
+        gridBody.appendChild(buildGridRow(r.month, r.values));
+      });
+    } else {
+      var seedVals = existing.length ? existing[existing.length - 1].values : {};
+      gridBody.appendChild(buildGridRow(currentMeta.nextMonth, seedVals));
+    }
+    refreshGridSummary();
+  }
+
+  function addMonths(count) {
+    for (var i = 0; i < count; i++) {
+      var prev = getLastRowData();
+      var nextMo = prev.month ? nextMonthStr(prev.month) : currentMeta.nextMonth;
+      gridBody.appendChild(buildGridRow(nextMo, prev.values));
+    }
+    refreshGridSummary();
+  }
+
+  function syncItemLinks(idStr) {
+    if (excelTemplateLink) {
+      excelTemplateLink.href = '/admin/indices/bulk/template?itemid=' + encodeURIComponent(idStr);
+    }
+  }
+
+  gridItemSelect.addEventListener('change', function() {
+    currentMeta = metaById[String(gridItemSelect.value)] || ITEMS_META[0];
+    if (excelItemSelect) excelItemSelect.value = String(currentMeta.id);
+    syncItemLinks(String(currentMeta.id));
+    loadItemGrid(true);
+  });
+
+  if (excelItemSelect) {
+    excelItemSelect.addEventListener('change', function() {
+      syncItemLinks(String(excelItemSelect.value));
+    });
+  }
+
+  document.getElementById('btnLoadExisting').addEventListener('click', function() { loadItemGrid(true); });
+  document.getElementById('btnAdd1Month').addEventListener('click', function() { addMonths(1); });
+  document.getElementById('btnAdd6Months').addEventListener('click', function() { addMonths(6); });
+  document.getElementById('btnClearGrid').addEventListener('click', function() {
+    gridBody.innerHTML = '';
+    addMonths(1);
+  });
+
+  // Direct Ctrl+V paste into grid or via modal
+  function parsePastedText(text) {
+    var lines = String(text || '').split(/\r?\n/).map(function(l) { return l.trim(); }).filter(Boolean);
+    if (!lines.length) return 0;
+    var added = 0;
+    lines.forEach(function(line, idx) {
+      var sep = line.indexOf('\t') !== -1 ? '\t' : ',';
+      var parts = line.split(sep).map(function(p) { return p.trim(); });
+      if (!parts.length) return;
+      // Skip header row if first cell says Month / Date
+      if (idx === 0 && /^(month|date|period)$/i.test(parts[0])) return;
+      var mo = parts[0];
+      // Normalize YYYY-MM-DD -> YYYY-MM
+      var mIso = /^(\d{4})[-/](\d{1,2})/.exec(mo);
+      if (mIso) mo = mIso[1] + '-' + String(parseInt(mIso[2], 10)).padStart(2, '0');
+      var vals = {};
+      currentMeta.keys.forEach(function(k, kIdx) {
+        var raw = parts[kIdx + 1];
+        if (raw !== undefined && raw !== '') {
+          var num = Number(raw.replace(/,/g, ''));
+          if (Number.isFinite(num)) vals[k] = num;
+        }
+      });
+      gridBody.appendChild(buildGridRow(mo, vals));
+      added += 1;
+    });
+    if (added > 0) refreshGridSummary();
+    return added;
+  }
+
+  gridBody.addEventListener('paste', function(e) {
+    var txt = (e.clipboardData || window.clipboardData).getData('text');
+    if (txt && (txt.indexOf('\n') !== -1 || txt.indexOf('\t') !== -1)) {
+      e.preventDefault();
+      parsePastedText(txt);
+    }
+  });
+
+  var pasteModalEl = document.getElementById('pasteSheetModal');
+  document.getElementById('btnOpenPasteModal').addEventListener('click', function() {
+    document.getElementById('pasteColumnOrder').textContent = 'Columns: Month, ' + currentMeta.keys.join(', ');
+    document.getElementById('pasteRawArea').value = '';
+    if (pasteModalEl && window.bootstrap) {
+      bootstrap.Modal.getOrCreateInstance(pasteModalEl).show();
+    }
+  });
+
+  document.getElementById('btnApplyPaste').addEventListener('click', function() {
+    var txt = document.getElementById('pasteRawArea').value;
+    if (parsePastedText(txt) > 0 && pasteModalEl && window.bootstrap) {
+      bootstrap.Modal.getOrCreateInstance(pasteModalEl).hide();
+    }
+  });
+
+  bulkGridForm.addEventListener('submit', function() {
+    var payload = [];
+    gridBody.querySelectorAll('tr').forEach(function(tr) {
+      var mo = (tr.querySelector('.grid-month').value || '').trim();
+      if (!mo) return;
+      var vals = {};
+      tr.querySelectorAll('.grid-val').forEach(function(inp) {
+        if (inp.value !== '') {
+          var n = Number(inp.value);
+          if (Number.isFinite(n)) vals[inp.getAttribute('data-key')] = n;
+        }
+      });
+      if (Object.keys(vals).length > 0) {
+        payload.push({ month: mo, values: vals });
+      }
+    });
+    bulkRowsJson.value = JSON.stringify(payload);
+  });
+
+  // Excel dropzone interactivity
+  var bulkFileInput = document.getElementById('bulkFileInput');
+  var bulkDropZone = document.getElementById('bulkDropZone');
+  var bulkFileTitle = document.getElementById('bulkFileTitle');
+  var bulkFileMeta = document.getElementById('bulkFileMeta');
+  function updateDropPreview(files) {
+    if (!files || !files.length) return;
+    var f = files[0];
+    bulkFileTitle.textContent = f.name;
+    bulkFileMeta.textContent = (f.size / 1024).toFixed(1) + ' KB';
+  }
+  if (bulkFileInput) {
+    bulkFileInput.addEventListener('change', function() { updateDropPreview(bulkFileInput.files); });
+  }
+  if (bulkDropZone && bulkFileInput) {
+    ['dragenter', 'dragover'].forEach(function(evt) {
+      bulkDropZone.addEventListener(evt, function(e) {
+        e.preventDefault();
+        bulkDropZone.style.borderColor = '#1d4ed8';
+        bulkDropZone.style.backgroundColor = '#eff6ff';
+      });
+    });
+    ['dragleave', 'drop'].forEach(function(evt) {
+      bulkDropZone.addEventListener(evt, function(e) {
+        e.preventDefault();
+        bulkDropZone.style.borderColor = '#cbd5e1';
+        bulkDropZone.style.backgroundColor = '';
+      });
+    });
+    bulkDropZone.addEventListener('drop', function(e) {
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+        bulkFileInput.files = e.dataTransfer.files;
+        updateDropPreview(bulkFileInput.files);
+      }
+    });
+  }
+
+  // ═══ TAB 3: MULTI-ITEM SINGLE MONTH ═══
+  var multiMonthInput = document.getElementById('multiMonthInput');
+  var multiContainer = document.getElementById('multiItemsContainer');
+  var multiSelectedCount = document.getElementById('multiSelectedCount');
+  var multiForm = document.getElementById('multiMonthForm');
+  var multiPayloadInp = document.getElementById('multiItemsPayload');
+
+  function updateMultiCount() {
+    var count = multiContainer.querySelectorAll('.multi-item-chk:checked').length;
+    multiSelectedCount.textContent = String(count);
+  }
+
+  function renderMultiItems() {
+    var targetMo = (multiMonthInput.value || '').trim();
+    multiContainer.innerHTML = '';
+    ITEMS_META.forEach(function(meta) {
+      var existingMap = getExistingMonthMap(meta);
+      var hasTarget = Boolean(existingMap[targetMo]);
+      var seed = hasTarget ? existingMap[targetMo] : ((meta.existingMonths && meta.existingMonths[0]) ? meta.existingMonths[0].values : {});
+
+      var box = document.createElement('div');
+      box.className = 'p-3 rounded border bg-white multi-item-block';
+      box.setAttribute('data-itemid', String(meta.id));
+
+      var inputsHtml = meta.keys.map(function(k) {
+        var val = seed && seed[k] !== undefined ? seed[k] : '';
+        return '<div class="col-6 col-md-3 col-lg-2">' +
+          '<label class="form-label small mono-num mb-1">' + escapeHtml(k) + '</label>' +
+          '<input type="number" step="any" class="form-control form-control-sm mono-num text-end multi-val" data-key="' + escapeHtml(k) + '" value="' + escapeHtml(val) + '">' +
+        '</div>';
+      }).join('');
+
+      box.innerHTML =
+        '<div class="d-flex justify-content-between align-items-center mb-2">' +
+          '<div class="form-check mb-0 border-0 bg-transparent p-0 d-flex align-items-center gap-2">' +
+            '<input class="form-check-input m-0 multi-item-chk" type="checkbox" id="mchk_' + meta.id + '" checked>' +
+            '<label class="form-check-label fw-bold text-dark m-0 p-0" for="mchk_' + meta.id + '">' + escapeHtml(meta.name) + '</label>' +
+          '</div>' +
+          '<span class="small mono-num ' + (hasTarget ? 'text-primary' : 'text-success') + '">' +
+            (hasTarget ? 'Update Existing' : 'New Month') +
+          '</span>' +
+        '</div>' +
+        '<div class="row g-2">' + inputsHtml + '</div>';
+
+      box.querySelector('.multi-item-chk').addEventListener('change', function(e) {
+        box.style.opacity = e.target.checked ? '1' : '0.45';
+        updateMultiCount();
+      });
+      multiContainer.appendChild(box);
+    });
+    updateMultiCount();
+  }
+
+  multiMonthInput.addEventListener('change', renderMultiItems);
+
+  multiForm.addEventListener('submit', function() {
+    var list = [];
+    multiContainer.querySelectorAll('.multi-item-block').forEach(function(block) {
+      if (!block.querySelector('.multi-item-chk').checked) return;
+      var itemId = Number(block.getAttribute('data-itemid'));
+      var vals = {};
+      block.querySelectorAll('.multi-val').forEach(function(inp) {
+        if (inp.value !== '') {
+          var n = Number(inp.value);
+          if (Number.isFinite(n)) vals[inp.getAttribute('data-key')] = n;
+        }
+      });
+      if (Object.keys(vals).length > 0) {
+        list.push({ itemid: itemId, values: vals });
+      }
+    });
+    multiPayloadInp.value = JSON.stringify(list);
+  });
+
+  // Initial load
+  loadItemGrid(true);
+  renderMultiItems();
+});
+</script>
+{% endblock %}

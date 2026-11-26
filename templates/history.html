@@ -7,8 +7,9 @@
     <div class="pvc-section-label">Audit Log</div>
     <h1 class="pvc-page-title">PVC Calculation History</h1>
   </div>
-  <div class="d-flex gap-2 no-print">
-    <a href="{{ url_for('pvc.calculator') }}" class="btn btn-primary">
+  <div class="d-flex flex-wrap align-items-center gap-2 no-print">
+    <input type="search" class="form-control form-control-sm" style="width: 210px;" placeholder="Filter history..." data-table-filter="#historyTable" aria-label="Filter calculation history">
+    <a href="{{ url_for('pvc.calculator') }}" class="btn btn-primary btn-sm">
       <i class="bi bi-calculator me-1"></i>New Calculation
     </a>
   </div>
@@ -19,16 +20,16 @@
 <div class="card">
   <div class="card-body p-0">
     <div class="table-responsive">
-      <table class="table table-hover mb-0 align-middle">
+      <table class="table table-hover mb-0 align-middle" id="historyTable">
         <thead>
           <tr>
-            <th>ID</th>
-            <th>Timestamp</th>
-            <th>Item</th>
-            <th class="text-end">Basic Rate (₹)</th>
-            <th class="text-end">Qty</th>
-            <th class="text-end">Final Payable (₹)</th>
-            <th>Selected Scenario</th>
+            <th data-sort="num">ID</th>
+            <th data-sort="text">Timestamp</th>
+            <th data-sort="text">Item</th>
+            <th class="text-end" data-sort="num">Basic Rate (₹)</th>
+            <th class="text-end" data-sort="num">Qty</th>
+            <th class="text-end" data-sort="num">Final Payable (₹)</th>
+            <th data-sort="text">Selected Scenario</th>
             <th class="text-end no-print">Report</th>
           </tr>
         </thead>

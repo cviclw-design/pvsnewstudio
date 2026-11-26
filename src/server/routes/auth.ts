@@ -68,7 +68,7 @@ authRouter.post('/login', (req, res) => {
 
   if (!user || !passwordValid) {
     res.render('login.html', {
-      login_error: 'Invalid username or password. Try admin / admin123 or operator / user123.',
+      login_error: 'Invalid username or password.',
       entered_username: username,
     });
     return;
