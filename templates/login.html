@@ -122,6 +122,19 @@
       {% endfor %}
     {% endif %}
 
+    <div id="googleAuthError" class="alert alert-danger py-2 small mb-3 d-none" role="alert"></div>
+
+    <button type="button" id="btnGoogleSignIn" class="btn btn-outline-dark w-100 py-2 mb-3 d-flex align-items-center justify-content-center gap-2 fw-semibold">
+      <i class="bi bi-google"></i>
+      <span>Sign in with Google</span>
+    </button>
+
+    <div class="d-flex align-items-center gap-2 my-3">
+      <hr class="flex-grow-1 m-0 text-muted">
+      <span class="small text-muted">or</span>
+      <hr class="flex-grow-1 m-0 text-muted">
+    </div>
+
     <form method="post" action="{{ url_for('auth.login') }}">
       <div class="mb-3">
         <label class="form-label" for="loginUsername">Username</label>

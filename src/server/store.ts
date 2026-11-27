@@ -309,6 +309,9 @@ function createInitialState(): StoreState {
 
 class MemoryStore {
   private state: StoreState;
+  private mutationRevision = 0;
+  private hydratedFromCloud = false;
+  private cloudOwnerUid: string | null = null;
 
   constructor() {
     this.state = this.load();
@@ -384,7 +387,155 @@ class MemoryStore {
     if (this.state.auditLogs.length > 1000) {
       this.state.auditLogs = this.state.auditLogs.slice(-1000);
     }
+    if (['item', 'item_index', 'tender_master', 'tender_vendor', 'pvc_result'].includes(tableName)) {
+      this.mutationRevision += 1;
+    }
     this.persist();
+  }
+
+  // ── Cloud Sync Bridge (Firestore <-> Store) ───────────────────────────
+  getSyncSnapshot(): {
+    revision: number;
+    hydratedFromCloud: boolean;
+    cloudOwnerUid: string | null;
+    items: ItemRecord[];
+    itemIndices: ItemIndexRecord[];
+    tenders: TenderMasterRecord[];
+    tenderVendors: TenderVendorRecord[];
+    pvcResults: PVCResultRecord[];
+  } {
+    return {
+      revision: this.mutationRevision,
+      hydratedFromCloud: this.hydratedFromCloud,
+      cloudOwnerUid: this.cloudOwnerUid,
+      items: this.state.items,
+      itemIndices: this.state.itemIndices,
+      tenders: this.state.tenders,
+      tenderVendors: this.state.tenderVendors,
+      pvcResults: this.state.pvcResults,
+    };
+  }
+
+  markCloudSynced(revision: number, ownerUid: string): void {
+    this.hydratedFromCloud = true;
+    this.cloudOwnerUid = ownerUid;
+    if (Number.isFinite(revision) && revision > this.mutationRevision) {
+      this.mutationRevision = revision;
+    }
+  }
+
+  hydrateFromCloud(payload: {
+    ownerUid: string;
+    revision: number;
+    items: ItemRecord[];
+    itemIndices: ItemIndexRecord[];
+    tenders: TenderMasterRecord[];
+    tenderVendors: TenderVendorRecord[];
+    pvcResults: PVCResultRecord[];
+    defaultUserId: number;
+  }): { changed: boolean; needsPushBack: boolean; revision: number } {
+    const cloudItems = Array.isArray(payload.items) ? payload.items : [];
+    const cloudIndices = Array.isArray(payload.itemIndices) ? payload.itemIndices : [];
+    const cloudTenders = Array.isArray(payload.tenders) ? payload.tenders : [];
+    const cloudVendors = Array.isArray(payload.tenderVendors) ? payload.tenderVendors : [];
+    const cloudResults = Array.isArray(payload.pvcResults) ? payload.pvcResults : [];
+
+    // If cloud has no items at all, keep current seeded/local data and push back to cloud
+    if (cloudItems.length === 0) {
+      this.hydratedFromCloud = true;
+      this.cloudOwnerUid = payload.ownerUid;
+      if (this.mutationRevision === 0) this.mutationRevision = 1;
+      return { changed: false, needsPushBack: true, revision: this.mutationRevision };
+    }
+
+    const hadLocalUnsyncedMutations = !this.hydratedFromCloud && this.mutationRevision > 0;
+    const beforeFingerprint = JSON.stringify({
+      items: this.state.items.length,
+      idx: this.state.itemIndices.length,
+      tnd: this.state.tenders.length,
+      vnd: this.state.tenderVendors.length,
+      res: this.state.pvcResults.length,
+    });
+
+    if (!hadLocalUnsyncedMutations) {
+      // Cold-start container or fresh sync: Firestore is authoritative
+      this.state.items = cloudItems.map((it) => ({
+        ...it,
+        lag_months: it.lag_months ?? 1,
+        base_lag_months: it.base_lag_months ?? 0,
+        fixed_weight: it.fixed_weight ?? 15,
+        index_source: it.index_source ?? 'IEEMA',
+      }));
+      this.state.itemIndices = cloudIndices.map((idx) => ({
+        ...idx,
+        attachments: Array.isArray(idx.attachments) ? idx.attachments : [],
+      }));
+      this.state.tenders = cloudTenders.map((t) => ({
+        ...t,
+        freightrateperunit: t.freightrateperunit ?? 0,
+        gst_rate: t.gst_rate ?? 18,
+      }));
+      this.state.tenderVendors = cloudVendors;
+      this.state.pvcResults = cloudResults.map((r) => ({
+        ...r,
+        user_id: r.user_id || payload.defaultUserId,
+      }));
+      this.mutationRevision = Math.max(1, Number(payload.revision) || 1);
+    } else {
+      // Merge cloud records with unsynced local uploads (local edits win on conflicts so nothing is lost)
+      const itemMap = new Map<number, ItemRecord>();
+      for (const it of cloudItems) itemMap.set(it.id, it);
+      for (const it of this.state.items) itemMap.set(it.id, it);
+      this.state.items = Array.from(itemMap.values());
+
+      const idxMap = new Map<string, ItemIndexRecord>();
+      for (const idx of cloudIndices) idxMap.set(`${idx.item_id}::${idx.month}`, { ...idx, attachments: idx.attachments || [] });
+      for (const idx of this.state.itemIndices) idxMap.set(`${idx.item_id}::${idx.month}`, idx);
+      this.state.itemIndices = Array.from(idxMap.values());
+
+      const tenderMap = new Map<string, TenderMasterRecord>();
+      for (const t of cloudTenders) tenderMap.set(t.tender_no.trim().toLowerCase(), t);
+      for (const t of this.state.tenders) tenderMap.set(t.tender_no.trim().toLowerCase(), t);
+      this.state.tenders = Array.from(tenderMap.values());
+
+      const vendorMap = new Map<string, TenderVendorRecord>();
+      for (const v of cloudVendors) vendorMap.set(`${v.tender_id}::${v.vendor_name.trim().toLowerCase()}`, v);
+      for (const v of this.state.tenderVendors) vendorMap.set(`${v.tender_id}::${v.vendor_name.trim().toLowerCase()}`, v);
+      this.state.tenderVendors = Array.from(vendorMap.values());
+
+      const resMap = new Map<number, PVCResultRecord>();
+      for (const r of cloudResults) resMap.set(r.id, { ...r, user_id: r.user_id || payload.defaultUserId });
+      for (const r of this.state.pvcResults) resMap.set(r.id, r);
+      this.state.pvcResults = Array.from(resMap.values());
+
+      this.mutationRevision = Math.max(this.mutationRevision, Number(payload.revision) || 0) + 1;
+    }
+
+    // Recompute safe nextIds so future creates never collide
+    const maxId = (arr: Array<{ id: number }>) => arr.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0);
+    this.state.nextIds.items = Math.max(this.state.nextIds.items, maxId(this.state.items) + 1);
+    this.state.nextIds.itemIndices = Math.max(this.state.nextIds.itemIndices, maxId(this.state.itemIndices) + 1);
+    this.state.nextIds.tenders = Math.max(this.state.nextIds.tenders, maxId(this.state.tenders) + 1);
+    this.state.nextIds.tenderVendors = Math.max(this.state.nextIds.tenderVendors, maxId(this.state.tenderVendors) + 1);
+    this.state.nextIds.pvcResults = Math.max(this.state.nextIds.pvcResults, maxId(this.state.pvcResults) + 1);
+
+    this.hydratedFromCloud = true;
+    this.cloudOwnerUid = payload.ownerUid;
+    this.persist();
+
+    const afterFingerprint = JSON.stringify({
+      items: this.state.items.length,
+      idx: this.state.itemIndices.length,
+      tnd: this.state.tenders.length,
+      vnd: this.state.tenderVendors.length,
+      res: this.state.pvcResults.length,
+    });
+
+    return {
+      changed: !hadLocalUnsyncedMutations || beforeFingerprint !== afterFingerprint,
+      needsPushBack: hadLocalUnsyncedMutations,
+      revision: this.mutationRevision,
+    };
   }
 
   // ── Users ─────────────────────────────────────────────────────────────
@@ -399,6 +550,11 @@ class MemoryStore {
   getUserByUsername(username: string): UserRecord | undefined {
     const normalized = username.trim().toLowerCase();
     return this.state.users.find((u) => u.username.trim().toLowerCase() === normalized);
+  }
+
+  getUserByEmail(email: string): UserRecord | undefined {
+    const normalized = email.trim().toLowerCase();
+    return this.state.users.find((u) => (u.email || '').trim().toLowerCase() === normalized);
   }
 
   hasAdmin(): boolean {

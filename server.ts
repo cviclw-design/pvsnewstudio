@@ -11,6 +11,7 @@ import { authRouter, consumeUserFlashes } from './src/server/routes/auth.js';
 import { mainRouter } from './src/server/routes/main.js';
 import { pvcRouter } from './src/server/routes/pvc.js';
 import { adminRouter } from './src/server/routes/admin.js';
+import { syncRouter } from './src/server/routes/sync.js';
 
 declare module 'express-session' {
   interface SessionData {
@@ -167,6 +168,7 @@ app.use('/', authRouter);
 app.use('/', mainRouter);
 app.use('/pvc', pvcRouter);
 app.use('/admin', adminRouter);
+app.use('/api/sync', syncRouter);
 
 // Health check
 app.get('/healthz', (_req, res) => {

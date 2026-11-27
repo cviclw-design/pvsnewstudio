@@ -1,0 +1,279 @@
+{
+  "entities": {
+    "Item": {
+      "title": "Item",
+      "description": "Configured PVC item with component weightages, lag months, formula mode, and index source.",
+      "type": "object",
+      "properties": {
+        "numericId": { "type": "number", "description": "Numeric item identifier used by the calculation engine." },
+        "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "code": { "type": "string", "maxLength": 80 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "pvc_formula_code": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "weights": { "type": "object", "description": "Native map of component weight percentages." },
+        "components": { "type": "array", "description": "Bounded list of component definitions (max 50)." },
+        "extra_fields": { "type": "array", "description": "Bounded list of item-specific input definitions (max 50)." },
+        "lag_months": { "type": "number" },
+        "base_lag_months": { "type": "number" },
+        "fixed_weight": { "type": "number" },
+        "index_source": { "type": "string", "maxLength": 200 },
+        "custom_formula": { "type": "string", "maxLength": 500 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "numericId",
+        "name",
+        "code",
+        "description",
+        "pvc_formula_code",
+        "weights",
+        "components",
+        "extra_fields",
+        "lag_months",
+        "base_lag_months",
+        "fixed_weight",
+        "index_source",
+        "custom_formula",
+        "ownerId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ItemIndex": {
+      "title": "ItemIndex",
+      "description": "Monthly index snapshot for a specific item (including bulk uploaded monthly indices).",
+      "type": "object",
+      "properties": {
+        "numericId": { "type": "number" },
+        "item_id": { "type": "number" },
+        "itemDocId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "month": { "type": "string", "minLength": 10, "maxLength": 10, "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "indices": { "type": "object", "description": "Native map of index symbol to numeric value." },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "numericId",
+        "item_id",
+        "itemDocId",
+        "month",
+        "indices",
+        "ownerId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Tender": {
+      "title": "Tender",
+      "description": "Tender master record with basic rate, base date, freight, and GST rate.",
+      "type": "object",
+      "properties": {
+        "numericId": { "type": "number" },
+        "item_id": { "type": "number" },
+        "itemDocId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "tender_no": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "basicrate": { "type": "number" },
+        "pvcbasedate": { "type": "string", "maxLength": 20 },
+        "freightrateperunit": { "type": "number" },
+        "gst_rate": { "type": "number" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "numericId",
+        "item_id",
+        "itemDocId",
+        "tender_no",
+        "basicrate",
+        "pvcbasedate",
+        "freightrateperunit",
+        "gst_rate",
+        "ownerId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "TenderVendor": {
+      "title": "TenderVendor",
+      "description": "Vendor entry associated with a tender including PO, CIF, currency, and freight.",
+      "type": "object",
+      "properties": {
+        "numericId": { "type": "number" },
+        "tender_id": { "type": "number" },
+        "tenderDocId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "po_no": { "type": "string", "maxLength": 120 },
+        "vendor_name": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "cif": { "type": "number" },
+        "freightrateperunit": { "type": "number" },
+        "currency": { "type": "string", "minLength": 1, "maxLength": 16 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "numericId",
+        "tender_id",
+        "tenderDocId",
+        "po_no",
+        "vendor_name",
+        "cif",
+        "freightrateperunit",
+        "currency",
+        "ownerId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PVCResult": {
+      "title": "PVCResult",
+      "description": "Saved PVC calculation result and scenario comparison breakdown.",
+      "type": "object",
+      "properties": {
+        "numericId": { "type": "number" },
+        "item_id": { "type": "number" },
+        "itemDocId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "username": { "type": "string", "maxLength": 100 },
+        "basicrate": { "type": "number" },
+        "quantity": { "type": "number" },
+        "freightrateperunit": { "type": "number" },
+        "pvcbasedate": { "type": "string", "maxLength": 20 },
+        "origdp": { "type": "string", "maxLength": 20 },
+        "refixeddp": { "type": "string", "maxLength": 20 },
+        "extendeddp": { "type": "string", "maxLength": 20 },
+        "caldate": { "type": "string", "maxLength": 20 },
+        "supdate": { "type": "string", "maxLength": 20 },
+        "rateapplied": { "type": "string", "maxLength": 160 },
+        "pvcactual": { "type": "number" },
+        "pvccontractual": { "type": "number" },
+        "loweractual": { "type": "number" },
+        "lowercontractual": { "type": "number" },
+        "ldamtactual": { "type": "number" },
+        "ldamtcontractual": { "type": "number" },
+        "fairprice": { "type": "number" },
+        "selectedscenario": { "type": "string", "maxLength": 40 },
+        "pvcactuallessldnew": { "type": "number" },
+        "pvccontractuallessldnew": { "type": "number" },
+        "loweractuallessld": { "type": "number" },
+        "lowercontractuallessld": { "type": "number" },
+        "delaydays": { "type": "number" },
+        "ldweeksnew": { "type": "number" },
+        "ldratepctnew": { "type": "number" },
+        "ldapplicable": { "type": "boolean" },
+        "pvcperseta2": { "type": "number" },
+        "pvcpersetb2": { "type": "number" },
+        "pvcpersetc1": { "type": "number" },
+        "pvcpersetd1": { "type": "number" },
+        "tenderno": { "type": "string", "maxLength": 120 },
+        "pono": { "type": "string", "maxLength": 120 },
+        "scenarioamounts": { "type": "object" },
+        "scenariodetails": { "type": "array" },
+        "igbt_vendor_details": { "type": "array" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "numericId",
+        "item_id",
+        "itemDocId",
+        "username",
+        "basicrate",
+        "quantity",
+        "freightrateperunit",
+        "pvcbasedate",
+        "origdp",
+        "refixeddp",
+        "extendeddp",
+        "caldate",
+        "supdate",
+        "rateapplied",
+        "pvcactual",
+        "pvccontractual",
+        "loweractual",
+        "lowercontractual",
+        "ldamtactual",
+        "ldamtcontractual",
+        "fairprice",
+        "selectedscenario",
+        "pvcactuallessldnew",
+        "pvccontractuallessldnew",
+        "loweractuallessld",
+        "lowercontractuallessld",
+        "delaydays",
+        "ldweeksnew",
+        "ldratepctnew",
+        "ldapplicable",
+        "pvcperseta2",
+        "pvcpersetb2",
+        "pvcpersetc1",
+        "pvcpersetd1",
+        "tenderno",
+        "pono",
+        "scenarioamounts",
+        "scenariodetails",
+        "igbt_vendor_details",
+        "ownerId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Trusted admin role assignment document.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "minLength": 3, "maxLength": 200 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "WorkspaceMeta": {
+      "title": "WorkspaceMeta",
+      "description": "Per-user workspace synchronization metadata tracking persisted Firestore state.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "revision": { "type": "number" },
+        "seeded": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "revision", "seeded", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/items/{itemId}": {
+      "schema": { "$ref": "#/entities/Item" },
+      "description": "PVC item master definitions owned by authenticated verified users."
+    },
+    "/item_indices/{indexId}": {
+      "schema": { "$ref": "#/entities/ItemIndex" },
+      "description": "Monthly index values (including bulk uploaded monthly indices) linked to an existing Item."
+    },
+    "/tenders/{tenderId}": {
+      "schema": { "$ref": "#/entities/Tender" },
+      "description": "Tender master records linked to an existing Item."
+    },
+    "/tender_vendors/{vendorId}": {
+      "schema": { "$ref": "#/entities/TenderVendor" },
+      "description": "Vendor records linked to an existing Tender."
+    },
+    "/pvc_results/{resultId}": {
+      "schema": { "$ref": "#/entities/PVCResult" },
+      "description": "Saved PVC calculation results linked to an existing Item."
+    },
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminRecord" },
+      "description": "Trusted admin records readable only by the matching user or bootstrapped admin."
+    },
+    "/workspace_meta/{metaId}": {
+      "schema": { "$ref": "#/entities/WorkspaceMeta" },
+      "description": "Workspace persistence state metadata keyed by user UID."
+    }
+  }
+}

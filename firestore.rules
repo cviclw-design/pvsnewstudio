@@ -1,0 +1,385 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 0: Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ── Global Primitives ───────────────────────────────────────────────
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'cviclw@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isVerifiedUser() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidBoundedList(arr, maxSize) {
+      return arr is list && arr.size() <= maxSize && (arr.size() == 0 || arr[0] is map);
+    }
+
+    // ── Entity Validation Blueprints ────────────────────────────────────
+    function isValidItem(data) {
+      return data.keys().hasAll([
+        'numericId', 'name', 'code', 'description', 'pvc_formula_code',
+        'weights', 'components', 'extra_fields', 'lag_months', 'base_lag_months',
+        'fixed_weight', 'index_source', 'custom_formula', 'ownerId', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'numericId', 'name', 'code', 'description', 'pvc_formula_code',
+        'weights', 'components', 'extra_fields', 'lag_months', 'base_lag_months',
+        'fixed_weight', 'index_source', 'custom_formula', 'ownerId', 'createdAt', 'updatedAt'
+      ]) &&
+      data.numericId is number && data.numericId >= 1 &&
+      data.name is string && data.name.size() >= 1 && data.name.size() <= 200 &&
+      data.code is string && data.code.size() <= 80 &&
+      data.description is string && data.description.size() <= 1000 &&
+      data.pvc_formula_code is string && data.pvc_formula_code.size() >= 1 && data.pvc_formula_code.size() <= 80 &&
+      data.weights is map &&
+      isValidBoundedList(data.components, 50) &&
+      isValidBoundedList(data.extra_fields, 50) &&
+      data.lag_months is number && data.lag_months >= 0 && data.lag_months <= 24 &&
+      data.base_lag_months is number && data.base_lag_months >= 0 && data.base_lag_months <= 24 &&
+      data.fixed_weight is number && data.fixed_weight >= 0 && data.fixed_weight <= 100 &&
+      data.index_source is string && data.index_source.size() <= 200 &&
+      data.custom_formula is string && data.custom_formula.size() <= 500 &&
+      isValidId(data.ownerId) && data.ownerId == request.auth.uid &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidItemIndex(data) {
+      return data.keys().hasAll([
+        'numericId', 'item_id', 'itemDocId', 'month', 'indices', 'ownerId', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'numericId', 'item_id', 'itemDocId', 'month', 'indices', 'ownerId', 'createdAt', 'updatedAt'
+      ]) &&
+      data.numericId is number && data.numericId >= 1 &&
+      data.item_id is number && data.item_id >= 1 &&
+      isValidId(data.itemDocId) &&
+      data.month is string && data.month.size() == 10 && data.month.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+      data.indices is map &&
+      isValidId(data.ownerId) && data.ownerId == request.auth.uid &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidTender(data) {
+      return data.keys().hasAll([
+        'numericId', 'item_id', 'itemDocId', 'tender_no', 'basicrate',
+        'pvcbasedate', 'freightrateperunit', 'gst_rate', 'ownerId', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'numericId', 'item_id', 'itemDocId', 'tender_no', 'basicrate',
+        'pvcbasedate', 'freightrateperunit', 'gst_rate', 'ownerId', 'createdAt', 'updatedAt'
+      ]) &&
+      data.numericId is number && data.numericId >= 1 &&
+      data.item_id is number && data.item_id >= 1 &&
+      isValidId(data.itemDocId) &&
+      data.tender_no is string && data.tender_no.size() >= 1 && data.tender_no.size() <= 120 &&
+      data.basicrate is number && data.basicrate >= 0 &&
+      data.pvcbasedate is string && data.pvcbasedate.size() <= 20 &&
+      data.freightrateperunit is number && data.freightrateperunit >= 0 &&
+      data.gst_rate is number && data.gst_rate >= 0 && data.gst_rate <= 100 &&
+      isValidId(data.ownerId) && data.ownerId == request.auth.uid &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidTenderVendor(data) {
+      return data.keys().hasAll([
+        'numericId', 'tender_id', 'tenderDocId', 'po_no', 'vendor_name',
+        'cif', 'freightrateperunit', 'currency', 'ownerId', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'numericId', 'tender_id', 'tenderDocId', 'po_no', 'vendor_name',
+        'cif', 'freightrateperunit', 'currency', 'ownerId', 'createdAt', 'updatedAt'
+      ]) &&
+      data.numericId is number && data.numericId >= 1 &&
+      data.tender_id is number && data.tender_id >= 1 &&
+      isValidId(data.tenderDocId) &&
+      data.po_no is string && data.po_no.size() <= 120 &&
+      data.vendor_name is string && data.vendor_name.size() >= 1 && data.vendor_name.size() <= 200 &&
+      data.cif is number && data.cif >= 0 &&
+      data.freightrateperunit is number && data.freightrateperunit >= 0 &&
+      data.currency is string && data.currency.size() >= 1 && data.currency.size() <= 16 &&
+      isValidId(data.ownerId) && data.ownerId == request.auth.uid &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidPVCResult(data) {
+      return data.keys().hasAll([
+        'numericId', 'item_id', 'itemDocId', 'username', 'basicrate', 'quantity',
+        'freightrateperunit', 'pvcbasedate', 'origdp', 'refixeddp', 'extendeddp',
+        'caldate', 'supdate', 'rateapplied', 'pvcactual', 'pvccontractual',
+        'loweractual', 'lowercontractual', 'ldamtactual', 'ldamtcontractual',
+        'fairprice', 'selectedscenario', 'pvcactuallessldnew', 'pvccontractuallessldnew',
+        'loweractuallessld', 'lowercontractuallessld', 'delaydays', 'ldweeksnew',
+        'ldratepctnew', 'ldapplicable', 'pvcperseta2', 'pvcpersetb2', 'pvcpersetc1',
+        'pvcpersetd1', 'tenderno', 'pono', 'scenarioamounts', 'scenariodetails',
+        'igbt_vendor_details', 'ownerId', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'numericId', 'item_id', 'itemDocId', 'username', 'basicrate', 'quantity',
+        'freightrateperunit', 'pvcbasedate', 'origdp', 'refixeddp', 'extendeddp',
+        'caldate', 'supdate', 'rateapplied', 'pvcactual', 'pvccontractual',
+        'loweractual', 'lowercontractual', 'ldamtactual', 'ldamtcontractual',
+        'fairprice', 'selectedscenario', 'pvcactuallessldnew', 'pvccontractuallessldnew',
+        'loweractuallessld', 'lowercontractuallessld', 'delaydays', 'ldweeksnew',
+        'ldratepctnew', 'ldapplicable', 'pvcperseta2', 'pvcpersetb2', 'pvcpersetc1',
+        'pvcpersetd1', 'tenderno', 'pono', 'scenarioamounts', 'scenariodetails',
+        'igbt_vendor_details', 'ownerId', 'createdAt', 'updatedAt'
+      ]) &&
+      data.numericId is number && data.numericId >= 1 &&
+      data.item_id is number && data.item_id >= 1 &&
+      isValidId(data.itemDocId) &&
+      data.username is string && data.username.size() <= 100 &&
+      data.basicrate is number &&
+      data.quantity is number &&
+      data.freightrateperunit is number &&
+      data.pvcbasedate is string && data.pvcbasedate.size() <= 20 &&
+      data.origdp is string && data.origdp.size() <= 20 &&
+      data.refixeddp is string && data.refixeddp.size() <= 20 &&
+      data.extendeddp is string && data.extendeddp.size() <= 20 &&
+      data.caldate is string && data.caldate.size() <= 20 &&
+      data.supdate is string && data.supdate.size() <= 20 &&
+      data.rateapplied is string && data.rateapplied.size() <= 160 &&
+      data.pvcactual is number &&
+      data.pvccontractual is number &&
+      data.loweractual is number &&
+      data.lowercontractual is number &&
+      data.ldamtactual is number &&
+      data.ldamtcontractual is number &&
+      data.fairprice is number &&
+      data.selectedscenario is string && data.selectedscenario.size() <= 40 &&
+      data.pvcactuallessldnew is number &&
+      data.pvccontractuallessldnew is number &&
+      data.loweractuallessld is number &&
+      data.lowercontractuallessld is number &&
+      data.delaydays is number &&
+      data.ldweeksnew is number &&
+      data.ldratepctnew is number &&
+      data.ldapplicable is bool &&
+      data.pvcperseta2 is number &&
+      data.pvcpersetb2 is number &&
+      data.pvcpersetc1 is number &&
+      data.pvcpersetd1 is number &&
+      data.tenderno is string && data.tenderno.size() <= 120 &&
+      data.pono is string && data.pono.size() <= 120 &&
+      data.scenarioamounts is map &&
+      isValidBoundedList(data.scenariodetails, 20) &&
+      isValidBoundedList(data.igbt_vendor_details, 50) &&
+      isValidId(data.ownerId) && data.ownerId == request.auth.uid &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidAdminRecord(data) {
+      return data.keys().hasAll(['uid', 'email', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'createdAt']) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 200 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidWorkspaceMeta(data) {
+      return data.keys().hasAll(['ownerId', 'revision', 'seeded', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['ownerId', 'revision', 'seeded', 'createdAt', 'updatedAt']) &&
+        isValidId(data.ownerId) && data.ownerId == request.auth.uid &&
+        data.revision is number && data.revision >= 0 &&
+        data.seeded is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // ── Collection Rules ────────────────────────────────────────────────
+
+    match /admins/{uid} {
+      allow get: if isVerifiedUser() && isValidId(uid) && (request.auth.uid == uid || isBootstrappedAdmin());
+      allow list: if isBootstrappedAdmin() && resource.data.uid is string;
+      allow create: if isBootstrappedAdmin() && isValidId(uid) && isValidAdminRecord(incoming()) && incoming().uid == uid && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isBootstrappedAdmin() && isValidId(uid);
+    }
+
+    match /workspace_meta/{metaId} {
+      allow get: if isVerifiedUser() && isValidId(metaId) && (metaId == request.auth.uid || isAdmin());
+      allow list: if isVerifiedUser() && (resource.data.ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() && isValidId(metaId) && metaId == request.auth.uid &&
+        isValidWorkspaceMeta(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && isValidId(metaId) &&
+        isValidWorkspaceMeta(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (existing().ownerId == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['revision', 'seeded', 'updatedAt']))
+        );
+      allow delete: if isVerifiedUser() && isValidId(metaId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /items/{itemId} {
+      allow get: if isVerifiedUser() && isValidId(itemId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isVerifiedUser() && (resource.data.ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() && isValidId(itemId) &&
+        isValidItem(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && isValidId(itemId) &&
+        isValidItem(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (existing().ownerId == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly([
+             'numericId', 'name', 'code', 'description', 'pvc_formula_code',
+             'weights', 'components', 'extra_fields', 'lag_months', 'base_lag_months',
+             'fixed_weight', 'index_source', 'custom_formula', 'updatedAt'
+           ]))
+        );
+      allow delete: if isVerifiedUser() && isValidId(itemId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /item_indices/{indexId} {
+      allow get: if isVerifiedUser() && isValidId(indexId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isVerifiedUser() && (resource.data.ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() && isValidId(indexId) &&
+        isValidItemIndex(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/items/$(incoming().itemDocId)) &&
+        get(/databases/$(database)/documents/items/$(incoming().itemDocId)).data.ownerId == request.auth.uid;
+      allow update: if isVerifiedUser() && isValidId(indexId) &&
+        isValidItemIndex(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().itemDocId == existing().itemDocId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (existing().ownerId == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['numericId', 'item_id', 'month', 'indices', 'updatedAt']))
+        );
+      allow delete: if isVerifiedUser() && isValidId(indexId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /tenders/{tenderId} {
+      allow get: if isVerifiedUser() && isValidId(tenderId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isVerifiedUser() && (resource.data.ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() && isValidId(tenderId) &&
+        isValidTender(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/items/$(incoming().itemDocId)) &&
+        get(/databases/$(database)/documents/items/$(incoming().itemDocId)).data.ownerId == request.auth.uid;
+      allow update: if isVerifiedUser() && isValidId(tenderId) &&
+        isValidTender(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          incoming().itemDocId == existing().itemDocId ||
+          (
+            exists(/databases/$(database)/documents/items/$(incoming().itemDocId)) &&
+            get(/databases/$(database)/documents/items/$(incoming().itemDocId)).data.ownerId == request.auth.uid
+          )
+        ) &&
+        (
+          isAdmin() ||
+          (existing().ownerId == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly([
+             'numericId', 'item_id', 'itemDocId', 'tender_no', 'basicrate',
+             'pvcbasedate', 'freightrateperunit', 'gst_rate', 'updatedAt'
+           ]))
+        );
+      allow delete: if isVerifiedUser() && isValidId(tenderId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /tender_vendors/{vendorId} {
+      allow get: if isVerifiedUser() && isValidId(vendorId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isVerifiedUser() && (resource.data.ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() && isValidId(vendorId) &&
+        isValidTenderVendor(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/tenders/$(incoming().tenderDocId)) &&
+        get(/databases/$(database)/documents/tenders/$(incoming().tenderDocId)).data.ownerId == request.auth.uid;
+      allow update: if isVerifiedUser() && isValidId(vendorId) &&
+        isValidTenderVendor(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().tenderDocId == existing().tenderDocId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (existing().ownerId == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly([
+             'numericId', 'tender_id', 'po_no', 'vendor_name', 'cif',
+             'freightrateperunit', 'currency', 'updatedAt'
+           ]))
+        );
+      allow delete: if isVerifiedUser() && isValidId(vendorId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /pvc_results/{resultId} {
+      allow get: if isVerifiedUser() && isValidId(resultId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isVerifiedUser() && (resource.data.ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() && isValidId(resultId) &&
+        isValidPVCResult(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/items/$(incoming().itemDocId)) &&
+        get(/databases/$(database)/documents/items/$(incoming().itemDocId)).data.ownerId == request.auth.uid;
+      allow update: if isVerifiedUser() && isValidId(resultId) &&
+        isValidPVCResult(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().itemDocId == existing().itemDocId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (existing().ownerId == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly([
+             'numericId', 'item_id', 'username', 'basicrate', 'quantity',
+             'freightrateperunit', 'pvcbasedate', 'origdp', 'refixeddp', 'extendeddp',
+             'caldate', 'supdate', 'rateapplied', 'pvcactual', 'pvccontractual',
+             'loweractual', 'lowercontractual', 'ldamtactual', 'ldamtcontractual',
+             'fairprice', 'selectedscenario', 'pvcactuallessldnew', 'pvccontractuallessldnew',
+             'loweractuallessld', 'lowercontractuallessld', 'delaydays', 'ldweeksnew',
+             'ldratepctnew', 'ldapplicable', 'pvcperseta2', 'pvcpersetb2', 'pvcpersetc1',
+             'pvcpersetd1', 'tenderno', 'pono', 'scenarioamounts', 'scenariodetails',
+             'igbt_vendor_details', 'updatedAt'
+           ]))
+        );
+      allow delete: if isVerifiedUser() && isValidId(resultId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+  }
+}

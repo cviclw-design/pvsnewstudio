@@ -4,13 +4,14 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "types": ["node"],
-    "lib": ["ES2022"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "resolveJsonModule": true,
     "strict": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "isolatedModules": true,
     "noEmit": true
   },
-  "include": ["server.ts", "src/server/**/*.ts"],
+  "include": ["server.ts", "src/server/**/*.ts", "src/client/**/*.ts"],
   "exclude": ["dist", "node_modules"]
 }
