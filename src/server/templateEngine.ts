@@ -77,6 +77,14 @@ export function buildUrlFor(endpoint: string, params: Record<string, unknown> = 
       return '/admin/indices/bulk/month';
     case 'admin.tenders_list':
       return '/admin/tenders';
+    case 'admin.tenders_bulk':
+      return '/admin/tenders/bulk';
+    case 'admin.tenders_bulk_save':
+      return '/admin/tenders/bulk/save';
+    case 'admin.tenders_bulk_upload':
+      return '/admin/tenders/bulk/upload';
+    case 'admin.tenders_bulk_template':
+      return '/admin/tenders/bulk/template';
     case 'admin.tenders_new':
       return '/admin/tenders/new';
     case 'admin.tenders_edit':

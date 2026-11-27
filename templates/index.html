@@ -162,7 +162,80 @@
 
       <!-- Lower rate data entry fields (hidden until checkbox ticked) -->
       <div id="lowerratesection" class="mt-3 pt-3 border-top" style="display:none;">
-        <div class="row g-3" id="manual_lower_rate_fields">
+        <div class="row g-3 align-items-end" id="subsequent_tender_fields">
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" for="subsequent_tenderid">Lower Rate Tender No</label>
+            <select class="form-select form-select-sm" name="subsequent_tenderid" id="subsequent_tenderid">
+              <option value="">-- Select Tender No --</option>
+              {% for t in tenders %}
+              <option
+                value="{{ t.id }}"
+                data-itemid="{{ t.item_id }}"
+              >
+                {{ t.tender_no }} – {{ t.item.name if t.item else '' }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4" id="subsequent_vendor_wrap" style="display:none;">
+            <label class="form-label fw-semibold" for="subsequent_vendorid">Tender Vendor</label>
+            <select class="form-select form-select-sm" id="subsequent_vendorid">
+              <option value="">-- Default / Tender Freight --</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Live Selected Lower Rate Tender Details -->
+        <div id="lowerTenderInfoCard" class="mt-3 p-3 rounded border bg-light" style="display:none; border-color: #cbd5e1 !important;">
+          <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 pb-2 mb-2 border-bottom">
+            <div class="fw-bold text-dark small">
+              <i class="bi bi-file-earmark-check text-primary me-1"></i>
+              <span id="ltTenderNo" class="mono-num"></span>
+              <span class="text-muted fw-normal ms-2" id="ltItemName"></span>
+            </div>
+            <div class="mono-num small text-primary fw-semibold" id="ltUnitGross"></div>
+          </div>
+
+          <div class="row g-3">
+            <div class="col-6 col-md-3">
+              <div class="pvc-section-label">Basic Rate</div>
+              <div class="mono-num fw-bold fs-6 text-dark" id="ltBasicRate">₹0.00</div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="pvc-section-label">Base Date</div>
+              <div class="mono-num fw-bold fs-6 text-dark" id="ltBaseDate">—</div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="pvc-section-label">Freight / Unit</div>
+              <div class="mono-num fw-bold fs-6 text-dark" id="ltFreight">₹0.00</div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="pvc-section-label">GST</div>
+              <div class="mono-num fw-bold fs-6 text-dark" id="ltGst">18%</div>
+              <div class="mono-num small text-muted" id="ltGstAmount"></div>
+            </div>
+          </div>
+
+          <div id="ltVendorsSection" class="mt-3 pt-2 border-top" style="display:none;">
+            <div class="pvc-section-label mb-1">Registered Vendors on Selected Tender</div>
+            <div class="table-responsive">
+              <table class="table table-sm mb-0 bg-white border">
+                <thead>
+                  <tr class="small text-muted">
+                    <th>Vendor Name</th>
+                    <th>PO No</th>
+                    <th class="text-end">CIF</th>
+                    <th class="text-center">Currency</th>
+                    <th class="text-end">Freight / Unit (₹)</th>
+                  </tr>
+                </thead>
+                <tbody id="ltVendorsBody" class="small mono-num"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="row g-3 mt-2" id="manual_lower_rate_fields">
           <div class="col-md-4">
             <label class="form-label fw-semibold">Lower Basic Rate (per unit)</label>
             <input class="form-control form-control-sm" type="number" step="any" name="lowerrate" id="lowerrate">
@@ -174,23 +247,6 @@
           <div class="col-md-4">
             <label class="form-label fw-semibold">Lower Base Date</label>
             <input class="form-control form-control-sm" type="date" name="lowerbasicdate" id="lowerbasicdate">
-          </div>
-        </div>
-        
-        <div class="row g-3 mt-1" id="subsequent_tender_fields" style="display:none;">
-          <div class="col-md-6">
-            <label class="form-label fw-semibold">Subsequent Tender</label>
-            <select class="form-select form-select-sm" name="subsequent_tenderid" id="subsequent_tenderid">
-              <option value="">-- Select Subsequent Tender --</option>
-              {% for t in tenders %}
-              <option
-                value="{{ t.id }}"
-                data-itemid="{{ t.item_id }}"
-              >
-                {{ t.tender_no }} – {{ t.item.name if t.item else '' }}
-              </option>
-              {% endfor %}
-            </select>
           </div>
         </div>
       </div>
@@ -382,39 +438,162 @@ function isDevelopmental() {
 // UI TOGGLE FUNCTIONS
 // ════════════════════════════════════════════════════════════════[...]
 
+const TENDERS_DATA = {{ tenders | tojson }};
+const TENDERS_BY_ID = {};
+TENDERS_DATA.forEach(t => {
+  TENDERS_BY_ID[String(t.id)] = t;
+});
+
+function formatINR(num) {
+  const n = Number(num || 0);
+  if (!Number.isFinite(n)) return "₹0.00";
+  return "₹" + n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function escapeText(str) {
+  return String(str ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function updateLowerTenderPreview(syncManualInputs) {
+  const subTenderSel = document.getElementById("subsequent_tenderid");
+  const subVendorWrap = document.getElementById("subsequent_vendor_wrap");
+  const subVendorSel = document.getElementById("subsequent_vendorid");
+  const card = document.getElementById("lowerTenderInfoCard");
+  if (!subTenderSel || !card) return;
+
+  const tid = subTenderSel.value;
+  const tender = tid ? TENDERS_BY_ID[String(tid)] : null;
+  if (!tender) {
+    card.style.display = "none";
+    if (subVendorWrap) subVendorWrap.style.display = "none";
+    if (subVendorSel) subVendorSel.innerHTML = '<option value="">-- Default / Tender Freight --</option>';
+    return;
+  }
+
+  const vendors = Array.isArray(tender.vendors) ? tender.vendors : [];
+  if (subVendorWrap && subVendorSel) {
+    const prevVendorId = subVendorSel.getAttribute("data-bound-tender") === String(tender.id)
+      ? subVendorSel.value
+      : "";
+    if (vendors.length > 0) {
+      subVendorWrap.style.display = "block";
+      subVendorSel.setAttribute("data-bound-tender", String(tender.id));
+      let opts = '<option value="">-- Default / Tender Freight --</option>';
+      vendors.forEach(v => {
+        const sel = String(v.id) === String(prevVendorId) ? " selected" : "";
+        opts += `<option value="${v.id}"${sel}>${escapeText(v.vendor_name)} (${formatINR(v.freightrateperunit || 0)})</option>`;
+      });
+      subVendorSel.innerHTML = opts;
+    } else {
+      subVendorWrap.style.display = "none";
+      subVendorSel.setAttribute("data-bound-tender", "");
+      subVendorSel.innerHTML = '<option value="">-- Default / Tender Freight --</option>';
+    }
+  }
+
+  const selectedVendorId = subVendorSel ? subVendorSel.value : "";
+  const chosenVendor = selectedVendorId
+    ? vendors.find(v => String(v.id) === String(selectedVendorId))
+    : null;
+
+  const basicRate = Number(tender.basicrate || 0);
+  const baseDate = tender.pvcbasedate || "";
+  const gstRate = (tender.gst_rate !== undefined && tender.gst_rate !== null && Number.isFinite(Number(tender.gst_rate)))
+    ? Number(tender.gst_rate)
+    : 18;
+
+  let freight = 0;
+  if (chosenVendor && Number.isFinite(Number(chosenVendor.freightrateperunit))) {
+    freight = Number(chosenVendor.freightrateperunit);
+  } else if (tender.freightrateperunit !== undefined && tender.freightrateperunit !== null && Number(tender.freightrateperunit) > 0) {
+    freight = Number(tender.freightrateperunit);
+  } else if (vendors.length > 0) {
+    const firstWithFreight = vendors.find(v => Number(v.freightrateperunit) > 0) || vendors[0];
+    freight = Number(firstWithFreight?.freightrateperunit || 0);
+  }
+
+  const taxable = basicRate + freight;
+  const gstAmount = taxable * (gstRate / 100);
+  const unitGross = taxable + gstAmount;
+
+  document.getElementById("ltTenderNo").textContent = tender.tender_no || "";
+  document.getElementById("ltItemName").textContent = tender.item?.name ? `· ${tender.item.name}` : "";
+  document.getElementById("ltBasicRate").textContent = formatINR(basicRate);
+  document.getElementById("ltBaseDate").textContent = baseDate || "—";
+  document.getElementById("ltFreight").textContent = formatINR(freight);
+  document.getElementById("ltGst").textContent = `${gstRate.toFixed(2).replace(/\.00$/, "")}%`;
+  document.getElementById("ltGstAmount").textContent = `Tax: ${formatINR(gstAmount)} / unit`;
+  document.getElementById("ltUnitGross").textContent = `Unit Gross (incl. GST): ${formatINR(unitGross)}`;
+
+  const vSection = document.getElementById("ltVendorsSection");
+  const vBody = document.getElementById("ltVendorsBody");
+  if (vSection && vBody) {
+    if (vendors.length > 0) {
+      vSection.style.display = "block";
+      vBody.innerHTML = vendors.map(v => `
+        <tr${chosenVendor && String(chosenVendor.id) === String(v.id) ? ' class="table-primary"' : ""}>
+          <td class="fw-semibold">${escapeText(v.vendor_name)}</td>
+          <td>${escapeText(v.po_no || "—")}</td>
+          <td class="text-end">${Number(v.cif || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td class="text-center">${escapeText(v.currency || "INR")}</td>
+          <td class="text-end fw-semibold">${formatINR(v.freightrateperunit || 0)}</td>
+        </tr>
+      `).join("");
+    } else {
+      vSection.style.display = "none";
+      vBody.innerHTML = "";
+    }
+  }
+
+  card.style.display = "block";
+
+  if (syncManualInputs && !isIGBTSelected()) {
+    const lrEl = document.getElementById("lowerrate");
+    const lfEl = document.getElementById("lowerfreight");
+    const ldEl = document.getElementById("lowerbasicdate");
+    if (lrEl) lrEl.value = basicRate ? basicRate.toFixed(2) : "";
+    if (lfEl) lfEl.value = freight.toFixed(2);
+    if (ldEl) ldEl.value = baseDate;
+  }
+}
+
 function toggleLowerRate() {
   const sec = document.getElementById("lowerratesection");
   if (!sec) return;
   const val  = (document.getElementById("rateapplied").value || "").trim().toLowerCase();
   const show = isLowerRateApplicable() || lowerModes.includes(val);
   sec.style.display = show ? "block" : "none";
-  
+
   const manualFields = document.getElementById("manual_lower_rate_fields");
   const subTenderFields = document.getElementById("subsequent_tender_fields");
   const subTenderSel = document.getElementById("subsequent_tenderid");
   const selectedItem = document.getElementById("itemid").value;
 
+  if (subTenderFields) subTenderFields.style.display = "flex";
+  if (subTenderSel) {
+    const options = subTenderSel.querySelectorAll("option");
+    let anyVisible = false;
+    options.forEach(opt => {
+      if (!opt.value) return;
+      const isMatch = !selectedItem || opt.getAttribute("data-itemid") === selectedItem;
+      opt.hidden = !isMatch;
+      if (isMatch && opt.selected) anyVisible = true;
+    });
+    if (subTenderSel.value && !anyVisible) {
+      subTenderSel.value = "";
+    }
+  }
+
   if (isIGBTSelected()) {
     if (manualFields) manualFields.style.display = "none";
-    if (subTenderFields) subTenderFields.style.display = "flex";
-    if (subTenderSel) {
-      const options = subTenderSel.querySelectorAll("option");
-      let anyVisible = false;
-      options.forEach(opt => {
-        if (!opt.value) return;
-        const isMatch = opt.getAttribute("data-itemid") === selectedItem;
-        opt.hidden = !isMatch;
-        if (isMatch && opt.selected) anyVisible = true;
-      });
-      if (subTenderSel.value && !anyVisible) {
-        subTenderSel.value = "";
-      }
-    }
   } else {
     if (manualFields) manualFields.style.display = "flex";
-    if (subTenderFields) subTenderFields.style.display = "none";
-    if (subTenderSel) subTenderSel.value = "";
   }
+
+  updateLowerTenderPreview(false);
 }
 
 function toggleTenderSection() {
@@ -669,8 +848,24 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("itemid")
     .addEventListener("change", () => {
       toggleTenderSection();
+      toggleLowerRate();
       renderExtraFields();
     });
+
+  const subTenderSelNode = document.getElementById("subsequent_tenderid");
+  if (subTenderSelNode) {
+    subTenderSelNode.addEventListener("change", () => {
+      updateLowerTenderPreview(true);
+      autoDetectRateApplied();
+    });
+  }
+
+  const subVendorSelNode = document.getElementById("subsequent_vendorid");
+  if (subVendorSelNode) {
+    subVendorSelNode.addEventListener("change", () => {
+      updateLowerTenderPreview(true);
+    });
+  }
 
   document.getElementById("tenderid")
     .addEventListener("change", () => {

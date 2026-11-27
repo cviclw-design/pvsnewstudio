@@ -1,0 +1,442 @@
+{% extends "base.html" %}
+{% block title %}Bulk Upload Tenders &amp; Vendors — PVC Calculation Studio{% endblock %}
+
+{% block content %}
+<div class="pvc-page-header">
+  <div>
+    <div class="pvc-section-label">Contract Master</div>
+    <h1 class="pvc-page-title">Bulk Upload Tenders &amp; Vendors</h1>
+  </div>
+  <div class="d-flex flex-wrap gap-2">
+    <a href="{{ url_for('admin.tenders_list') }}" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-arrow-left me-1"></i>Tenders
+    </a>
+  </div>
+</div>
+
+<!-- Mode Switcher -->
+<ul class="nav nav-tabs mb-4" id="bulkTenderTabs" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active" id="tab-excel-btn" data-bs-toggle="tab" data-bs-target="#pane-excel" type="button" role="tab">
+      <i class="bi bi-file-earmark-spreadsheet me-1"></i>Excel / CSV Upload
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-grid-btn" data-bs-toggle="tab" data-bs-target="#pane-grid" type="button" role="tab">
+      <i class="bi bi-table me-1"></i>Spreadsheet Grid &amp; Paste
+    </button>
+  </li>
+</ul>
+
+<div class="tab-content" id="bulkTenderTabContent">
+
+  <!-- ═══ TAB 1: EXCEL / CSV UPLOAD ═══ -->
+  <div class="tab-pane fade show active" id="pane-excel" role="tabpanel">
+    <form method="post" action="{{ url_for('admin.tenders_bulk_upload') }}" enctype="multipart/form-data">
+      <div class="card">
+        <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <h6 class="fw-bold mb-0"><i class="bi bi-file-earmark-arrow-up me-2 text-primary"></i>Upload Tender &amp; Vendor Workbook</h6>
+          <a href="{{ url_for('admin.tenders_bulk_template') }}" class="btn btn-sm btn-outline-primary">
+            <i class="bi bi-download me-1"></i>Download Template (.xlsx)
+          </a>
+        </div>
+        <div class="card-body">
+          <div class="row g-3 mb-4">
+            <div class="col-md-6">
+              <label class="form-label" for="excelDefaultItem">Default Item (Optional Fallback)</label>
+              <select id="excelDefaultItem" name="default_itemid" class="form-select">
+                <option value="">-- Match from Item Column --</option>
+                {% for it in items %}
+                <option value="{{ it.id }}">
+                  {{ it.name }}{% if it.code %} ({{ it.code }}){% endif %}
+                </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Supported Columns</label>
+              <div class="form-control bg-light mono-num small text-muted" style="height: auto; min-height: 38px;">
+                Item, Tender No, Basic Rate, PVC Base Date, Freight, GST %, Vendor Name, PO No, CIF, Vendor Freight, Currency
+              </div>
+            </div>
+          </div>
+
+          <label
+            for="bulkTenderFileInput"
+            id="bulkTenderDropZone"
+            class="w-100 p-5 rounded border border-2 text-center bg-light bulk-dropzone"
+            style="border-style: dashed !important; border-color: #cbd5e1 !important; cursor: pointer;"
+          >
+            <i class="bi bi-file-earmark-spreadsheet fs-1 text-primary d-block mb-2"></i>
+            <div class="fw-semibold text-dark mb-1" id="bulkTenderFileTitle">Choose or Drop Excel / CSV File</div>
+            <div class="mono-num small text-muted" id="bulkTenderFileMeta">.xlsx, .xls, .csv</div>
+            <input id="bulkTenderFileInput" type="file" name="bulk_file" class="d-none" accept=".xlsx,.xls,.csv" required>
+          </label>
+
+          <div class="d-flex justify-content-end mt-4 pt-3 border-top">
+            <button type="submit" class="btn btn-primary px-4">
+              <i class="bi bi-cloud-upload me-1"></i>Import Tenders &amp; Vendors
+            </button>
+          </div>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <!-- ═══ TAB 2: INTERACTIVE GRID & PASTE ═══ -->
+  <div class="tab-pane fade" id="pane-grid" role="tabpanel">
+    <form id="bulkTenderGridForm" method="post" action="{{ url_for('admin.tenders_bulk_save') }}">
+      <input type="hidden" name="rows_json" id="bulkTenderRowsJson" value="[]">
+
+      <div class="card">
+        <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-3">
+          <div class="d-flex flex-wrap align-items-center gap-3">
+            <div>
+              <label class="form-label mb-1 small" for="gridDefaultItem">Default Item</label>
+              <select id="gridDefaultItem" name="default_itemid" class="form-select form-select-sm" style="min-width: 220px;">
+                {% for it in items %}
+                <option value="{{ it.id }}">
+                  {{ it.name }}{% if it.code %} ({{ it.code }}){% endif %}
+                </option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <div class="d-flex flex-wrap align-items-center gap-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnLoadExistingTenders">
+              <i class="bi bi-arrow-clockwise me-1"></i>Load Existing
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="btnAdd1TenderRow">
+              <i class="bi bi-plus-lg me-1"></i>+1 Row
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="btnAdd5TenderRows">
+              +5 Rows
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnOpenTenderPasteModal">
+              <i class="bi bi-clipboard-plus me-1"></i>Paste Sheet
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnClearTenderGrid">
+              Clear
+            </button>
+          </div>
+        </div>
+
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-bordered table-sm mb-0 align-middle bulk-grid-table" id="bulkTenderGridTable">
+              <thead>
+                <tr>
+                  <th style="min-width: 185px;">Item</th>
+                  <th style="min-width: 165px;">Tender No</th>
+                  <th style="min-width: 120px;">Basic Rate (₹)</th>
+                  <th style="min-width: 135px;">Base Date</th>
+                  <th style="min-width: 110px;">Freight (₹)</th>
+                  <th style="min-width: 80px;">GST (%)</th>
+                  <th style="min-width: 165px;">Vendor Name</th>
+                  <th style="min-width: 120px;">PO No</th>
+                  <th style="min-width: 110px;">CIF</th>
+                  <th style="min-width: 115px;">Vendor Freight</th>
+                  <th style="min-width: 90px;">Currency</th>
+                  <th style="width: 44px;" class="text-center">#</th>
+                </tr>
+              </thead>
+              <tbody id="bulkTenderGridBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card-footer bg-white d-flex flex-wrap justify-content-between align-items-center gap-3 py-3">
+          <div class="small mono-num d-flex flex-wrap align-items-center gap-3">
+            <span class="text-muted">Rows: <strong class="text-dark" id="sumTenderRows">0</strong></span>
+            <span class="text-primary">Unique Tenders: <strong id="sumUniqueTenders">0</strong></span>
+            <span class="text-success">Vendor Entries: <strong id="sumVendorRows">0</strong></span>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <a href="{{ url_for('admin.tenders_list') }}" class="btn btn-sm btn-outline-secondary">View All Tenders</a>
+            <button type="submit" class="btn btn-primary btn-sm px-4" id="btnSaveBulkTenders">
+              <i class="bi bi-check2-all me-1"></i>Save All Tenders &amp; Vendors
+            </button>
+          </div>
+        </div>
+      </div>
+    </form>
+  </div>
+
+</div>
+
+<!-- Paste from Excel Modal -->
+<div class="modal fade" id="pasteTendersModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content border-0 shadow">
+      <div class="modal-header bg-white border-bottom">
+        <h6 class="modal-title fw-bold mb-0"><i class="bi bi-clipboard-plus me-2 text-primary"></i>Paste Tender &amp; Vendor Rows</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mono-num small text-muted mb-2">
+          Columns: Item | Tender No | Basic Rate | Base Date | Freight | GST % | Vendor Name | PO No | CIF | Vendor Freight | Currency
+        </div>
+        <textarea id="pasteTendersTextarea" class="form-control mono-num small" rows="10" placeholder="IGBT Propulsion System&#9;TND/2025/001&#9;27500000&#9;2025-01-01&#9;80000&#9;18&#9;M/s BHEL&#9;PO250101&#9;5800000&#9;80000&#9;EUR"></textarea>
+      </div>
+      <div class="modal-footer bg-light border-top">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-sm btn-primary" id="btnApplyPastedTenders">
+          <i class="bi bi-table me-1"></i>Populate Grid
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extrajs %}
+<script>
+(function() {
+  "use strict";
+
+  const ITEMS_LIST = {{ items | tojson }};
+  const EXISTING_ROWS = {{ existingFlatRows | tojson }};
+
+  const tbody = document.getElementById("bulkTenderGridBody");
+  const defaultItemSel = document.getElementById("gridDefaultItem");
+
+  function escHtml(v) {
+    return String(v ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function resolveItemId(raw) {
+    const s = String(raw ?? "").trim();
+    if (!s) return defaultItemSel ? defaultItemSel.value : (ITEMS_LIST[0]?.id || "");
+    if (/^\d+$/.test(s)) {
+      const hit = ITEMS_LIST.find(it => String(it.id) === s);
+      if (hit) return String(hit.id);
+    }
+    const lower = s.toLowerCase();
+    const match = ITEMS_LIST.find(it =>
+      String(it.code || "").trim().toLowerCase() === lower ||
+      String(it.name || "").trim().toLowerCase() === lower ||
+      (`${it.name}${it.code ? " (" + it.code + ")" : ""}`).trim().toLowerCase() === lower
+    );
+    if (match) return String(match.id);
+    return defaultItemSel ? defaultItemSel.value : (ITEMS_LIST[0]?.id || "");
+  }
+
+  function buildItemOptionsHtml(selectedId) {
+    return ITEMS_LIST.map(it => {
+      const sel = String(it.id) === String(selectedId) ? " selected" : "";
+      const label = it.name + (it.code ? " (" + it.code + ")" : "");
+      return `<option value="${it.id}"${sel}>${escHtml(label)}</option>`;
+    }).join("");
+  }
+
+  function buildCurrencyOptionsHtml(selectedCurr) {
+    const curr = String(selectedCurr || "INR").trim().toUpperCase();
+    const list = ["INR", "EUR", "USD", "JPY", "GBP"];
+    if (curr && !list.includes(curr)) list.push(curr);
+    return list.map(c => `<option value="${escHtml(c)}"${c === curr ? " selected" : ""}>${escHtml(c)}</option>`).join("");
+  }
+
+  function createRow(data = {}) {
+    const tr = document.createElement("tr");
+    const itemId = resolveItemId(data.item_id ?? data.item ?? "");
+    const gstVal = data.gst_rate !== undefined && data.gst_rate !== "" ? data.gst_rate : "18";
+
+    tr.innerHTML = `
+      <td><select class="form-select form-select-sm bt-item">${buildItemOptionsHtml(itemId)}</select></td>
+      <td><input type="text" class="form-control form-control-sm mono-num bt-tender" placeholder="TND/2025/001" value="${escHtml(data.tender_no || "")}"></td>
+      <td><input type="number" step="any" class="form-control form-control-sm mono-num bt-basic" placeholder="0.00" value="${escHtml(data.basicrate ?? "")}"></td>
+      <td><input type="date" class="form-control form-control-sm mono-num bt-date" value="${escHtml(data.pvcbasedate || "")}"></td>
+      <td><input type="number" step="any" class="form-control form-control-sm mono-num bt-freight" placeholder="0.00" value="${escHtml(data.freightrateperunit ?? "")}"></td>
+      <td><input type="number" step="any" class="form-control form-control-sm mono-num bt-gst" placeholder="18" value="${escHtml(gstVal)}"></td>
+      <td><input type="text" class="form-control form-control-sm bt-vendor" placeholder="Vendor Name" value="${escHtml(data.vendor_name || "")}"></td>
+      <td><input type="text" class="form-control form-control-sm mono-num bt-po" placeholder="PO No" value="${escHtml(data.po_no || "")}"></td>
+      <td><input type="number" step="any" class="form-control form-control-sm mono-num bt-cif" placeholder="0.00" value="${escHtml(data.cif ?? "")}"></td>
+      <td><input type="number" step="any" class="form-control form-control-sm mono-num bt-vfreight" placeholder="0.00" value="${escHtml(data.vendor_freight ?? "")}"></td>
+      <td><select class="form-select form-select-sm mono-num bt-curr">${buildCurrencyOptionsHtml(data.currency || "INR")}</select></td>
+      <td class="text-center">
+        <button type="button" class="btn btn-sm btn-link text-danger p-0 bt-remove" title="Remove row">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </td>
+    `;
+
+    tr.querySelector(".bt-remove").addEventListener("click", () => {
+      tr.remove();
+      if (tbody.children.length === 0) tbody.appendChild(createRow());
+      updateCounters();
+    });
+
+    tr.querySelectorAll("input, select").forEach(el => {
+      el.addEventListener("input", updateCounters);
+      el.addEventListener("change", updateCounters);
+    });
+
+    return tr;
+  }
+
+  function collectRows() {
+    const out = [];
+    tbody.querySelectorAll("tr").forEach(tr => {
+      const tenderNo = tr.querySelector(".bt-tender").value.trim();
+      const vendorName = tr.querySelector(".bt-vendor").value.trim();
+      if (!tenderNo && !vendorName) return;
+      out.push({
+        item: tr.querySelector(".bt-item").value,
+        tender_no: tenderNo,
+        basicrate: tr.querySelector(".bt-basic").value,
+        pvcbasedate: tr.querySelector(".bt-date").value,
+        freightrateperunit: tr.querySelector(".bt-freight").value,
+        gst_rate: tr.querySelector(".bt-gst").value,
+        vendor_name: vendorName,
+        po_no: tr.querySelector(".bt-po").value.trim(),
+        cif: tr.querySelector(".bt-cif").value,
+        vendor_freight: tr.querySelector(".bt-vfreight").value,
+        currency: tr.querySelector(".bt-curr").value,
+      });
+    });
+    return out;
+  }
+
+  function updateCounters() {
+    const rows = collectRows();
+    const tenders = new Set(rows.map(r => r.tender_no.toLowerCase()).filter(Boolean));
+    const vendors = rows.filter(r => r.vendor_name.length > 0).length;
+    document.getElementById("sumTenderRows").textContent = String(rows.length);
+    document.getElementById("sumUniqueTenders").textContent = String(tenders.size);
+    document.getElementById("sumVendorRows").textContent = String(vendors);
+  }
+
+  function addEmptyRows(count) {
+    for (let i = 0; i < count; i++) {
+      tbody.appendChild(createRow());
+    }
+    updateCounters();
+  }
+
+  function loadExistingRows() {
+    tbody.innerHTML = "";
+    if (EXISTING_ROWS.length > 0) {
+      EXISTING_ROWS.forEach(r => tbody.appendChild(createRow(r)));
+    } else {
+      addEmptyRows(3);
+    }
+    updateCounters();
+  }
+
+  // Initial state: 3 blank rows ready for entry
+  addEmptyRows(3);
+
+  document.getElementById("btnAdd1TenderRow").addEventListener("click", () => addEmptyRows(1));
+  document.getElementById("btnAdd5TenderRows").addEventListener("click", () => addEmptyRows(5));
+  document.getElementById("btnLoadExistingTenders").addEventListener("click", loadExistingRows);
+  document.getElementById("btnClearTenderGrid").addEventListener("click", () => {
+    tbody.innerHTML = "";
+    addEmptyRows(3);
+  });
+
+  // Paste sheet modal
+  const pasteModalEl = document.getElementById("pasteTendersModal");
+  const pasteTextarea = document.getElementById("pasteTendersTextarea");
+  document.getElementById("btnOpenTenderPasteModal").addEventListener("click", () => {
+    if (pasteModalEl && window.bootstrap) {
+      bootstrap.Modal.getOrCreateInstance(pasteModalEl).show();
+      setTimeout(() => pasteTextarea && pasteTextarea.focus(), 180);
+    }
+  });
+
+  function normalizePastedDate(s) {
+    const raw = String(s || "").trim();
+    if (!raw) return "";
+    let m = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/.exec(raw);
+    if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+    m = /^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/.exec(raw);
+    if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+    return raw;
+  }
+
+  document.getElementById("btnApplyPastedTenders").addEventListener("click", () => {
+    const raw = (pasteTextarea.value || "").trim();
+    if (!raw) return;
+    const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (!lines.length) return;
+
+    const firstCells = lines[0].includes("\t") ? lines[0].split("\t") : lines[0].split(",");
+    const headerLike = firstCells.some(c => /tender\s*no|basic\s*rate|vendor\s*name/i.test(c));
+    const dataLines = headerLike ? lines.slice(1) : lines;
+
+    tbody.innerHTML = "";
+    dataLines.forEach(line => {
+      const cells = (line.includes("\t") ? line.split("\t") : line.split(",")).map(c => c.trim().replace(/^"|"$/g, ""));
+      if (!cells.some(Boolean)) return;
+      tbody.appendChild(createRow({
+        item: cells[0] || "",
+        tender_no: cells[1] || "",
+        basicrate: cells[2] || "",
+        pvcbasedate: normalizePastedDate(cells[3] || ""),
+        freightrateperunit: cells[4] || "",
+        gst_rate: cells[5] || "18",
+        vendor_name: cells[6] || "",
+        po_no: cells[7] || "",
+        cif: cells[8] || "",
+        vendor_freight: cells[9] || "",
+        currency: cells[10] || "INR",
+      }));
+    });
+    if (tbody.children.length === 0) addEmptyRows(3);
+    updateCounters();
+    pasteTextarea.value = "";
+    if (pasteModalEl && window.bootstrap) {
+      bootstrap.Modal.getOrCreateInstance(pasteModalEl).hide();
+    }
+  });
+
+  // Serialize before submit
+  document.getElementById("bulkTenderGridForm").addEventListener("submit", () => {
+    document.getElementById("bulkTenderRowsJson").value = JSON.stringify(collectRows());
+  });
+
+  // Dropzone UX for Tab 1
+  const fileInput = document.getElementById("bulkTenderFileInput");
+  const dropZone = document.getElementById("bulkTenderDropZone");
+  const fileTitle = document.getElementById("bulkTenderFileTitle");
+  const fileMeta = document.getElementById("bulkTenderFileMeta");
+
+  function showSelectedFile(file) {
+    if (!file) return;
+    fileTitle.textContent = file.name;
+    fileMeta.textContent = `${(file.size / 1024).toFixed(1)} KB`;
+    dropZone.classList.add("border-primary", "bg-white");
+  }
+
+  if (fileInput) {
+    fileInput.addEventListener("change", () => {
+      if (fileInput.files && fileInput.files[0]) showSelectedFile(fileInput.files[0]);
+    });
+  }
+  if (dropZone) {
+    ["dragenter", "dragover"].forEach(ev => {
+      dropZone.addEventListener(ev, e => {
+        e.preventDefault();
+        dropZone.classList.add("border-primary", "bg-white");
+      });
+    });
+    ["dragleave", "drop"].forEach(ev => {
+      dropZone.addEventListener(ev, e => {
+        e.preventDefault();
+        if (ev === "drop" && e.dataTransfer && e.dataTransfer.files.length) {
+          fileInput.files = e.dataTransfer.files;
+          showSelectedFile(e.dataTransfer.files[0]);
+        } else if (!fileInput.files || !fileInput.files.length) {
+          dropZone.classList.remove("border-primary", "bg-white");
+        }
+      });
+    });
+  }
+})();
+</script>
+{% endblock %}

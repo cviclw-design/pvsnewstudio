@@ -1018,10 +1018,480 @@ adminRouter.post('/indices/bulk/month', (req, res) => {
 
 // ── Tenders ───────────────────────────────────────────────────────────────
 
+function parseFlexibleDateYMD(raw: unknown): string | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  if (raw instanceof Date && !isNaN(raw.getTime())) {
+    const y = raw.getUTCFullYear();
+    const m = String(raw.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(raw.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 10000 && raw < 100000) {
+    const dt = new Date(Math.round((raw - 25569) * 86400 * 1000));
+    if (!isNaN(dt.getTime())) {
+      const y = dt.getUTCFullYear();
+      const m = String(dt.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(dt.getUTCDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+  }
+  const s = String(raw).trim();
+  if (!s) return null;
+
+  // YYYY-MM-DD or YYYY/MM/DD
+  let m = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/.exec(s);
+  if (m) {
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const da = Number(m[3]);
+    if (mo >= 1 && mo <= 12 && da >= 1 && da <= 31) {
+      return `${y}-${String(mo).padStart(2, '0')}-${String(da).padStart(2, '0')}`;
+    }
+  }
+
+  // DD-MM-YYYY or DD/MM/YYYY
+  m = /^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/.exec(s);
+  if (m) {
+    const da = Number(m[1]);
+    const mo = Number(m[2]);
+    const y = Number(m[3]);
+    if (mo >= 1 && mo <= 12 && da >= 1 && da <= 31) {
+      return `${y}-${String(mo).padStart(2, '0')}-${String(da).padStart(2, '0')}`;
+    }
+  }
+
+  // DD-MMM-YYYY or DD MMM YYYY (e.g. 01-Apr-2024)
+  const monMap: Record<string, number> = {
+    jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+    jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+  };
+  m = /^(\d{1,2})[-\s/]([a-zA-Z]{3,9})[-\s/](\d{2,4})$/.exec(s);
+  if (m) {
+    const da = Number(m[1]);
+    const mo = monMap[m[2].slice(0, 3).toLowerCase()];
+    let y = Number(m[3]);
+    if (y < 100) y += 2000;
+    if (mo && da >= 1 && da <= 31) {
+      return `${y}-${String(mo).padStart(2, '0')}-${String(da).padStart(2, '0')}`;
+    }
+  }
+
+  // Fallback to month-start format (YYYY-MM or MMM-YYYY)
+  const monthFallback = parseFlexibleMonthStart(s);
+  if (monthFallback) return monthFallback;
+
+  return null;
+}
+
+function resolveItemForBulk(rawItem: unknown, fallbackItemId: number | null): ItemRecord | undefined {
+  const items = store.getItems();
+  const s = String(rawItem ?? '').trim();
+  if (s) {
+    if (/^\d+$/.test(s)) {
+      const byId = store.getItemById(parseInt(s, 10));
+      if (byId) return byId;
+    }
+    const lower = s.toLowerCase();
+    const byCode = items.find((it) => (it.code || '').trim().toLowerCase() === lower);
+    if (byCode) return byCode;
+    const byName = items.find((it) => it.name.trim().toLowerCase() === lower);
+    if (byName) return byName;
+    const byCombined = items.find(
+      (it) => `${it.name}${it.code ? ` (${it.code})` : ''}`.trim().toLowerCase() === lower
+    );
+    if (byCombined) return byCombined;
+    const partialMatches = items.filter(
+      (it) => it.name.toLowerCase().includes(lower) || lower.includes(it.name.toLowerCase())
+    );
+    if (partialMatches.length === 1) return partialMatches[0];
+  }
+  if (fallbackItemId != null) {
+    return store.getItemById(fallbackItemId);
+  }
+  return undefined;
+}
+
+interface BulkTenderVendorInput {
+  item?: unknown;
+  tender_no?: unknown;
+  basicrate?: unknown;
+  pvcbasedate?: unknown;
+  freightrateperunit?: unknown;
+  gst_rate?: unknown;
+  vendor_name?: unknown;
+  po_no?: unknown;
+  cif?: unknown;
+  vendor_freight?: unknown;
+  currency?: unknown;
+}
+
+function parseOptionalNumber(raw: unknown): number | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const cleaned = String(raw).replace(/[₹,\s%]/g, '').trim();
+  if (!cleaned) return null;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
+}
+
+function processBulkTenderVendorRows(
+  rows: BulkTenderVendorInput[],
+  fallbackItemId: number | null,
+  userId: number
+): {
+  tendersCreated: number;
+  tendersUpdated: number;
+  vendorsCreated: number;
+  vendorsUpdated: number;
+  skipped: number;
+} {
+  let tendersCreated = 0;
+  let tendersUpdated = 0;
+  let vendorsCreated = 0;
+  let vendorsUpdated = 0;
+  let skipped = 0;
+
+  // Track tenders touched within this batch so multiple vendor rows for the same tender
+  // don't double-count tender updates or overwrite tender fields with blank cells.
+  const touchedTenders = new Set<number>();
+
+  for (const row of rows) {
+    const tenderNo = String(row.tender_no ?? '').trim();
+    if (!tenderNo) {
+      skipped += 1;
+      continue;
+    }
+
+    const existingTender = store.getTenderByNo(tenderNo);
+    const resolvedItem = resolveItemForBulk(row.item, fallbackItemId);
+
+    const parsedBasic = parseOptionalNumber(row.basicrate);
+    const parsedDate = parseFlexibleDateYMD(row.pvcbasedate);
+    const parsedTenderFreight = parseOptionalNumber(row.freightrateperunit);
+    const parsedGst = parseOptionalNumber(row.gst_rate);
+    const parsedVendorFreight = parseOptionalNumber(row.vendor_freight);
+
+    let tenderId: number;
+    if (existingTender) {
+      tenderId = existingTender.id;
+      const patch: Record<string, unknown> = {};
+      if (resolvedItem && resolvedItem.id !== existingTender.item_id && !touchedTenders.has(tenderId)) {
+        patch.item_id = resolvedItem.id;
+      }
+      if (parsedBasic !== null) patch.basicrate = parsedBasic;
+      if (parsedDate !== null) patch.pvcbasedate = parsedDate;
+      if (parsedTenderFreight !== null) patch.freightrateperunit = parsedTenderFreight;
+      if (parsedGst !== null) patch.gst_rate = parsedGst;
+
+      if (Object.keys(patch).length > 0) {
+        store.updateTender(tenderId, patch, userId);
+        if (!touchedTenders.has(tenderId)) {
+          tendersUpdated += 1;
+          touchedTenders.add(tenderId);
+        }
+      } else {
+        touchedTenders.add(tenderId);
+      }
+    } else {
+      if (!resolvedItem) {
+        skipped += 1;
+        continue;
+      }
+      const createdTender = store.createTender(
+        {
+          item_id: resolvedItem.id,
+          tender_no: tenderNo,
+          basicrate: parsedBasic ?? 0,
+          pvcbasedate: parsedDate,
+          freightrateperunit: parsedTenderFreight ?? parsedVendorFreight ?? 0,
+          gst_rate: parsedGst ?? 18,
+        },
+        userId
+      );
+      tenderId = createdTender.id;
+      tendersCreated += 1;
+      touchedTenders.add(tenderId);
+    }
+
+    const vendorName = String(row.vendor_name ?? '').trim();
+    if (vendorName) {
+      const poNo = String(row.po_no ?? '').trim() || null;
+      const cifVal = parseOptionalNumber(row.cif) ?? 0;
+      const vFreightVal = parsedVendorFreight ?? parsedTenderFreight ?? 0;
+      const currencyVal = String(row.currency ?? '').trim().toUpperCase() || 'INR';
+
+      const existingVendor = store.getTenderVendorByName(tenderId, vendorName);
+      if (existingVendor) {
+        store.updateTenderVendor(
+          tenderId,
+          existingVendor.id,
+          {
+            vendor_name: vendorName,
+            po_no: poNo ?? existingVendor.po_no,
+            cif: parseOptionalNumber(row.cif) !== null ? cifVal : existingVendor.cif,
+            freightrateperunit:
+              parsedVendorFreight !== null || parsedTenderFreight !== null
+                ? vFreightVal
+                : existingVendor.freightrateperunit,
+            currency: String(row.currency ?? '').trim() ? currencyVal : existingVendor.currency,
+          },
+          userId
+        );
+        vendorsUpdated += 1;
+      } else {
+        store.createTenderVendor(
+          {
+            tender_id: tenderId,
+            vendor_name: vendorName,
+            po_no: poNo,
+            cif: cifVal,
+            freightrateperunit: vFreightVal,
+            currency: currencyVal,
+          },
+          userId
+        );
+        vendorsCreated += 1;
+      }
+    }
+  }
+
+  return { tendersCreated, tendersUpdated, vendorsCreated, vendorsUpdated, skipped };
+}
+
 adminRouter.get('/tenders', (_req, res) => {
   res.locals.request.endpoint = 'admin.tenders_list';
   const tenders = store.getTenders();
   res.render('admin_tenders_list.html', { tenders });
+});
+
+adminRouter.get('/tenders/bulk', (_req, res) => {
+  res.locals.request.endpoint = 'admin.tenders_bulk';
+  const items = store.getItems();
+  const tenders = store.getTenders();
+  const existingFlatRows: Array<Record<string, unknown>> = [];
+  for (const t of tenders) {
+    if (t.vendors && t.vendors.length > 0) {
+      for (const v of t.vendors) {
+        existingFlatRows.push({
+          item_id: t.item_id,
+          tender_no: t.tender_no,
+          basicrate: t.basicrate ?? 0,
+          pvcbasedate: t.pvcbasedate || '',
+          freightrateperunit: t.freightrateperunit ?? v.freightrateperunit ?? 0,
+          gst_rate: t.gst_rate ?? 18,
+          vendor_name: v.vendor_name,
+          po_no: v.po_no || '',
+          cif: v.cif ?? 0,
+          vendor_freight: v.freightrateperunit ?? 0,
+          currency: v.currency || 'INR',
+        });
+      }
+    } else {
+      existingFlatRows.push({
+        item_id: t.item_id,
+        tender_no: t.tender_no,
+        basicrate: t.basicrate ?? 0,
+        pvcbasedate: t.pvcbasedate || '',
+        freightrateperunit: t.freightrateperunit ?? 0,
+        gst_rate: t.gst_rate ?? 18,
+        vendor_name: '',
+        po_no: '',
+        cif: '',
+        vendor_freight: '',
+        currency: 'INR',
+      });
+    }
+  }
+  res.render('admin_tenders_bulk.html', {
+    items,
+    existingFlatRows,
+    existingTenderNos: tenders.map((t) => t.tender_no),
+  });
+});
+
+adminRouter.get('/tenders/bulk/template', (_req, res) => {
+  const items = store.getItems();
+  const sampleItem1 = items[0]?.name || 'IGBT Propulsion System';
+  const sampleItem2 = items[1]?.name || sampleItem1;
+
+  const headers = [
+    'Item',
+    'Tender No',
+    'Basic Rate',
+    'PVC Base Date',
+    'Freight',
+    'GST %',
+    'Vendor Name',
+    'PO No',
+    'CIF',
+    'Vendor Freight',
+    'Currency',
+  ];
+
+  const sampleRows = [
+    {
+      Item: sampleItem1,
+      'Tender No': 'TND/2025/SAMPLE-01',
+      'Basic Rate': 27500000,
+      'PVC Base Date': '2025-01-01',
+      Freight: 80000,
+      'GST %': 18,
+      'Vendor Name': 'M/s Vendor Alpha',
+      'PO No': 'PO2500101',
+      CIF: 5800000,
+      'Vendor Freight': 80000,
+      Currency: 'EUR',
+    },
+    {
+      Item: sampleItem1,
+      'Tender No': 'TND/2025/SAMPLE-01',
+      'Basic Rate': 27500000,
+      'PVC Base Date': '2025-01-01',
+      Freight: 80000,
+      'GST %': 18,
+      'Vendor Name': 'M/s Vendor Beta',
+      'PO No': 'PO2500102',
+      CIF: 5650000,
+      'Vendor Freight': 76000,
+      Currency: 'USD',
+    },
+    {
+      Item: sampleItem2,
+      'Tender No': 'TND/2025/SAMPLE-02',
+      'Basic Rate': 3180000,
+      'PVC Base Date': '2025-02-01',
+      Freight: 21500,
+      'GST %': 18,
+      'Vendor Name': 'M/s Vendor Gamma',
+      'PO No': 'PO2500201',
+      CIF: 0,
+      'Vendor Freight': 21500,
+      Currency: 'INR',
+    },
+  ];
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(sampleRows, { header: headers });
+  XLSX.utils.book_append_sheet(wb, ws, 'TendersAndVendors');
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+
+  res.setHeader('Content-Disposition', 'attachment; filename="tenders_vendors_bulk_template.xlsx"');
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.send(buf);
+});
+
+adminRouter.post('/tenders/bulk/upload', handleBulkSheetUpload, (req, res) => {
+  const file = req.file;
+  if (!file || !file.buffer) {
+    flashMessage(req, 'Please choose an Excel (.xlsx / .xls) or CSV file.', 'danger');
+    res.redirect('/admin/tenders/bulk');
+    return;
+  }
+
+  const fallbackItemRaw = parseInt(String(req.body.default_itemid || ''), 10);
+  const fallbackItemId = Number.isFinite(fallbackItemRaw) ? fallbackItemRaw : null;
+  const userId = res.locals.current_user.id;
+
+  try {
+    const wb = XLSX.read(file.buffer, { type: 'buffer', cellDates: false });
+    const firstSheetName = wb.SheetNames[0];
+    if (!firstSheetName) {
+      flashMessage(req, 'Uploaded file contains no sheets.', 'danger');
+      res.redirect('/admin/tenders/bulk');
+      return;
+    }
+    const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[firstSheetName], { defval: '' });
+    if (!rawRows.length) {
+      flashMessage(req, 'Uploaded sheet has no data rows.', 'warning');
+      res.redirect('/admin/tenders/bulk');
+      return;
+    }
+
+    const pickCol = (row: Record<string, unknown>, aliases: string[]): unknown => {
+      for (const key of Object.keys(row)) {
+        const norm = key.trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+        if (aliases.includes(norm)) return row[key];
+      }
+      return '';
+    };
+
+    const normalizedRows: BulkTenderVendorInput[] = rawRows.map((r) => ({
+      item: pickCol(r, ['item', 'itemname', 'itemcode', 'itemid']),
+      tender_no: pickCol(r, ['tenderno', 'tendernumber', 'tender', 'tendercode']),
+      basicrate: pickCol(r, ['basicrate', 'rate', 'unitrate', 'basicrateperunit', 'tenderbasicrate']),
+      pvcbasedate: pickCol(r, ['pvcbasedate', 'basedate', 'tenderbasedate', 'date']),
+      freightrateperunit: pickCol(r, ['freight', 'tenderfreight', 'freightperunit', 'freightrate', 'freightrateperunit']),
+      gst_rate: pickCol(r, ['gst', 'gstpct', 'gstrate', 'gstpercent', 'tax', 'taxrate']),
+      vendor_name: pickCol(r, ['vendorname', 'vendor', 'firm', 'firmname', 'supplier', 'suppliername']),
+      po_no: pickCol(r, ['pono', 'ponumber', 'po', 'contractno', 'orderno']),
+      cif: pickCol(r, ['cif', 'cifvalue', 'cifamount']),
+      vendor_freight: pickCol(r, ['vendorfreight', 'vendorfreightperunit', 'vfreight']),
+      currency: pickCol(r, ['currency', 'curr', 'cifcurrency']),
+    }));
+
+    const stats = processBulkTenderVendorRows(normalizedRows, fallbackItemId, userId);
+    if (
+      stats.tendersCreated === 0 &&
+      stats.tendersUpdated === 0 &&
+      stats.vendorsCreated === 0 &&
+      stats.vendorsUpdated === 0
+    ) {
+      flashMessage(req, 'No valid tender or vendor rows found in the uploaded file.', 'warning');
+      res.redirect('/admin/tenders/bulk');
+      return;
+    }
+
+    const parts: string[] = [];
+    if (stats.tendersCreated > 0) parts.push(`${stats.tendersCreated} tender(s) created`);
+    if (stats.tendersUpdated > 0) parts.push(`${stats.tendersUpdated} tender(s) updated`);
+    if (stats.vendorsCreated > 0) parts.push(`${stats.vendorsCreated} vendor(s) created`);
+    if (stats.vendorsUpdated > 0) parts.push(`${stats.vendorsUpdated} vendor(s) updated`);
+    if (stats.skipped > 0) parts.push(`${stats.skipped} row(s) skipped`);
+
+    flashMessage(req, `Imported ${file.originalname}: ${parts.join(', ')}.`, 'success');
+    res.redirect('/admin/tenders');
+  } catch (err) {
+    flashMessage(req, `Failed to parse file: ${err instanceof Error ? err.message : 'Unknown error'}`, 'danger');
+    res.redirect('/admin/tenders/bulk');
+  }
+});
+
+adminRouter.post('/tenders/bulk/save', (req, res) => {
+  const fallbackItemRaw = parseInt(String(req.body.default_itemid || ''), 10);
+  const fallbackItemId = Number.isFinite(fallbackItemRaw) ? fallbackItemRaw : null;
+  const userId = res.locals.current_user.id;
+
+  let rows: BulkTenderVendorInput[] = [];
+  try {
+    const parsed = JSON.parse(String(req.body.rows_json || '[]'));
+    if (!Array.isArray(parsed)) throw new Error('Invalid payload');
+    rows = parsed;
+  } catch {
+    flashMessage(req, 'Invalid bulk tender & vendor payload.', 'danger');
+    res.redirect('/admin/tenders/bulk');
+    return;
+  }
+
+  const stats = processBulkTenderVendorRows(rows, fallbackItemId, userId);
+  if (
+    stats.tendersCreated === 0 &&
+    stats.tendersUpdated === 0 &&
+    stats.vendorsCreated === 0 &&
+    stats.vendorsUpdated === 0
+  ) {
+    flashMessage(req, 'No valid tender or vendor rows found to save.', 'warning');
+    res.redirect('/admin/tenders/bulk');
+    return;
+  }
+
+  const parts: string[] = [];
+  if (stats.tendersCreated > 0) parts.push(`${stats.tendersCreated} tender(s) created`);
+  if (stats.tendersUpdated > 0) parts.push(`${stats.tendersUpdated} tender(s) updated`);
+  if (stats.vendorsCreated > 0) parts.push(`${stats.vendorsCreated} vendor(s) created`);
+  if (stats.vendorsUpdated > 0) parts.push(`${stats.vendorsUpdated} vendor(s) updated`);
+  if (stats.skipped > 0) parts.push(`${stats.skipped} row(s) skipped`);
+
+  flashMessage(req, `Bulk save completed: ${parts.join(', ')}.`, 'success');
+  res.redirect('/admin/tenders');
 });
 
 adminRouter.get('/tenders/new', (_req, res) => {
@@ -1043,12 +1513,15 @@ adminRouter.post('/tenders/new', (req, res) => {
     res.redirect('/admin/tenders/new');
     return;
   }
+  const rawGst = String(req.body.gst_rate ?? '').trim();
   store.createTender(
     {
       item_id: itemid,
       tender_no: tenderno,
       basicrate: safeFloat(req.body.basicrate),
       pvcbasedate: String(req.body.pvcbasedate || '').trim() || null,
+      freightrateperunit: safeFloat(req.body.freightrateperunit),
+      gst_rate: rawGst !== '' ? safeFloat(rawGst) : 18,
     },
     res.locals.current_user.id
   );
@@ -1087,6 +1560,7 @@ adminRouter.post('/tenders/:tenderid/edit', (req, res) => {
     res.redirect(`/admin/tenders/${tender.id}/edit`);
     return;
   }
+  const rawGst = String(req.body.gst_rate ?? '').trim();
   store.updateTender(
     tender.id,
     {
@@ -1094,6 +1568,8 @@ adminRouter.post('/tenders/:tenderid/edit', (req, res) => {
       tender_no: tenderno,
       basicrate: safeFloat(req.body.basicrate),
       pvcbasedate: String(req.body.pvcbasedate || '').trim() || null,
+      freightrateperunit: safeFloat(req.body.freightrateperunit),
+      gst_rate: rawGst !== '' ? safeFloat(rawGst) : 18,
     },
     res.locals.current_user.id
   );

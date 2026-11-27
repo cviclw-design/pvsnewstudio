@@ -60,6 +60,8 @@ export interface TenderMasterRecord {
   tender_no: string;
   basicrate: number;
   pvcbasedate: string | null;
+  freightrateperunit?: number;
+  gst_rate?: number;
   created_at: string;
 }
 

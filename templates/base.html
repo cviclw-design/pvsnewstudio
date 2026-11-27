@@ -88,10 +88,22 @@
               </li>
             </ul>
           </li>
-          <li class="nav-item">
-            <a class="nav-link text-nowrap {% if request.endpoint and ('admin.tenders' in request.endpoint or 'admin.tender_vendors' in request.endpoint) %}active{% endif %}" href="{{ url_for('admin.tenders_list') }}">
+          <li class="nav-item dropdown">
+            <a class="nav-link text-nowrap dropdown-toggle {% if request.endpoint and ('admin.tenders' in request.endpoint or 'admin.tender_vendors' in request.endpoint) %}active{% endif %}" href="#" id="tendersDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
               Tenders
             </a>
+            <ul class="dropdown-menu shadow-sm border" aria-labelledby="tendersDropdown">
+              <li>
+                <a class="dropdown-item" href="{{ url_for('admin.tenders_list') }}">
+                  <i class="bi bi-file-earmark-text me-2 text-muted"></i>All Tenders &amp; Vendors
+                </a>
+              </li>
+              <li>
+                <a class="dropdown-item" href="{{ url_for('admin.tenders_bulk') }}">
+                  <i class="bi bi-cloud-upload me-2 text-muted"></i>Bulk Upload Tenders &amp; Vendors
+                </a>
+              </li>
+            </ul>
           </li>
           {% if current_user.is_admin %}
           <li class="nav-item dropdown">

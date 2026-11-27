@@ -9,6 +9,9 @@
   </div>
   <div class="d-flex flex-wrap align-items-center gap-2">
     <input type="search" class="form-control form-control-sm" style="width: 210px;" placeholder="Filter tenders..." data-table-filter="#tendersTable" aria-label="Filter tenders">
+    <a href="{{ url_for('admin.tenders_bulk') }}" class="btn btn-outline-primary btn-sm">
+      <i class="bi bi-cloud-upload me-1"></i>Bulk Upload
+    </a>
     <a href="{{ url_for('admin.tenders_new') }}" class="btn btn-primary btn-sm">
       <i class="bi bi-plus-circle me-1"></i>Add Tender
     </a>
@@ -22,13 +25,15 @@
       <table class="table table-hover mb-0 align-middle" id="tendersTable">
         <thead>
           <tr>
-            <th style="width: 70px;" data-sort="num">ID</th>
+            <th style="width: 64px;" data-sort="num">ID</th>
             <th data-sort="text">Tender No</th>
             <th data-sort="text">Item</th>
             <th class="text-end" data-sort="num">Basic Rate (₹)</th>
-            <th class="text-center" data-sort="text">PVC Base Date</th>
+            <th class="text-center" data-sort="text">Base Date</th>
+            <th class="text-end" data-sort="num">Freight (₹)</th>
+            <th class="text-center" data-sort="num">GST</th>
             <th class="text-center" data-sort="num">Vendors</th>
-            <th class="text-end" style="width: 240px;">Actions</th>
+            <th class="text-end" style="width: 230px;">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -41,6 +46,10 @@
               {% if t.basicrate != null %}₹{{ pyfmt("{:,.2f}", t.basicrate | float(0)) }}{% else %}—{% endif %}
             </td>
             <td class="text-center mono-num small">{{ t.pvcbasedate or '—' }}</td>
+            <td class="text-end mono-num">
+              {% if t.freightrateperunit != null %}₹{{ pyfmt("{:,.2f}", t.freightrateperunit | float(0)) }}{% else %}—{% endif %}
+            </td>
+            <td class="text-center mono-num small">{{ pyfmt("%.2f", t.gst_rate | float(18)) if t.gst_rate != null else '18.00' }}%</td>
             <td class="text-center mono-num small fw-semibold">{{ t.vendors | length if t.vendors else 0 }}</td>
             <td class="text-end text-nowrap">
               <a href="{{ url_for('admin.tender_vendors_list', tenderid=t.id) }}" class="btn btn-sm btn-primary me-1">
@@ -70,9 +79,14 @@
   <div class="card-body text-center py-5">
     <i class="bi bi-file-earmark-text fs-2 text-muted d-block mb-2"></i>
     <h6 class="fw-bold mb-3">No tenders configured yet</h6>
-    <a href="{{ url_for('admin.tenders_new') }}" class="btn btn-primary btn-sm">
-      <i class="bi bi-plus-circle me-1"></i>Add Tender
-    </a>
+    <div class="d-flex justify-content-center gap-2">
+      <a href="{{ url_for('admin.tenders_bulk') }}" class="btn btn-outline-primary btn-sm">
+        <i class="bi bi-cloud-upload me-1"></i>Bulk Upload
+      </a>
+      <a href="{{ url_for('admin.tenders_new') }}" class="btn btn-primary btn-sm">
+        <i class="bi bi-plus-circle me-1"></i>Add Tender
+      </a>
+    </div>
   </div>
 </div>
 {% endif %}

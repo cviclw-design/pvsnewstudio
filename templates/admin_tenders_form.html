@@ -40,17 +40,31 @@
                  value="{{ tender.tender_no if tender else '' }}">
         </div>
 
-        <div class="col-md-6">
+        <div class="col-md-3">
           <label class="form-label" for="tenderBasicRate">Basic Rate (₹)</label>
           <input id="tenderBasicRate" type="number" step="0.01" name="basicrate" class="form-control mono-num"
                  placeholder="0.00"
                  value="{{ tender.basicrate if tender and tender.basicrate != null else '' }}">
         </div>
 
-        <div class="col-md-6">
+        <div class="col-md-3">
           <label class="form-label" for="tenderBaseDate">PVC Base Date</label>
           <input id="tenderBaseDate" type="date" name="pvcbasedate" class="form-control mono-num"
                  value="{{ tender.pvcbasedate if tender and tender.pvcbasedate else '' }}">
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label" for="tenderFreight">Freight / Unit (₹)</label>
+          <input id="tenderFreight" type="number" step="0.01" name="freightrateperunit" class="form-control mono-num"
+                 placeholder="0.00"
+                 value="{{ tender.freightrateperunit if tender and tender.freightrateperunit != null else '' }}">
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label" for="tenderGst">GST (%)</label>
+          <input id="tenderGst" type="number" step="0.01" min="0" max="100" name="gst_rate" class="form-control mono-num"
+                 placeholder="18"
+                 value="{{ tender.gst_rate if tender and tender.gst_rate != null else '18' }}">
         </div>
       </div>
 

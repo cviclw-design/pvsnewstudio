@@ -185,6 +185,8 @@ function createInitialState(): StoreState {
       tender_no: 'TND/EL/IGBT/2023/001',
       basicrate: 28500000,
       pvcbasedate: '2023-03-01',
+      freightrateperunit: 85000,
+      gst_rate: 18,
       created_at: '2023-03-15T10:00:00.000Z',
     },
     {
@@ -193,6 +195,8 @@ function createInitialState(): StoreState {
       tender_no: 'TND/EL/IGBT/2024/002',
       basicrate: 27400000,
       pvcbasedate: '2024-04-01',
+      freightrateperunit: 80000,
+      gst_rate: 18,
       created_at: '2024-04-10T10:00:00.000Z',
     },
     {
@@ -201,6 +205,8 @@ function createInitialState(): StoreState {
       tender_no: 'TND/EL/TM/2023/105',
       basicrate: 3250000,
       pvcbasedate: '2023-06-01',
+      freightrateperunit: 22000,
+      gst_rate: 18,
       created_at: '2023-06-12T10:00:00.000Z',
     },
     {
@@ -209,6 +215,8 @@ function createInitialState(): StoreState {
       tender_no: 'TND/EL/TRF/2024/088',
       basicrate: 7850000,
       pvcbasedate: '2024-01-01',
+      freightrateperunit: 45000,
+      gst_rate: 18,
       created_at: '2024-01-20T10:00:00.000Z',
     },
   ];
@@ -314,6 +322,15 @@ class MemoryStore {
         if (parsed && Array.isArray(parsed.users) && Array.isArray(parsed.items)) {
           for (const idx of parsed.itemIndices || []) {
             if (!Array.isArray(idx.attachments)) idx.attachments = [];
+          }
+          for (const t of parsed.tenders || []) {
+            if (typeof t.gst_rate !== 'number' || !Number.isFinite(t.gst_rate)) {
+              t.gst_rate = 18;
+            }
+            if (typeof t.freightrateperunit !== 'number' || !Number.isFinite(t.freightrateperunit)) {
+              const firstVendor = (parsed.tenderVendors || []).find((v) => v.tender_id === t.id && Number(v.freightrateperunit) > 0);
+              t.freightrateperunit = firstVendor ? Number(firstVendor.freightrateperunit) : 0;
+            }
           }
           for (const it of parsed.items || []) {
             if (it.lag_months === undefined || it.lag_months === null) {
@@ -612,6 +629,13 @@ class MemoryStore {
 
   getTenderVendorById(tenderId: number, rowId: number): TenderVendorRecord | undefined {
     return this.state.tenderVendors.find((v) => v.tender_id === tenderId && v.id === rowId);
+  }
+
+  getTenderVendorByName(tenderId: number, vendorName: string): TenderVendorRecord | undefined {
+    const target = vendorName.trim().toLowerCase();
+    return this.state.tenderVendors.find(
+      (v) => v.tender_id === tenderId && v.vendor_name.trim().toLowerCase() === target
+    );
   }
 
   createTenderVendor(input: Omit<TenderVendorRecord, 'id'>, actorId: number | null = null): TenderVendorRecord {
