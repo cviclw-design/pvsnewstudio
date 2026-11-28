@@ -199,6 +199,7 @@ function getAuthHeaders(): Record<string, string> {
 
 interface SyncSnapshotResponse {
   ok: boolean;
+  bootId?: string;
   revision: number;
   hydratedFromCloud: boolean;
   cloudOwnerUid: string | null;
@@ -216,27 +217,54 @@ interface BatchWriteItem {
   op: 'set' | 'delete';
 }
 
-async function commitInChunks(ops: BatchWriteItem[]): Promise<void> {
-  const CHUNK_SIZE = 400;
-  for (let i = 0; i < ops.length; i += CHUNK_SIZE) {
-    const slice = ops.slice(i, i + CHUNK_SIZE);
-    const batch = writeBatch(db);
-    for (const item of slice) {
-      const ref = doc(db, item.col, item.id);
-      if (item.op === 'delete') {
-        batch.delete(ref);
-      } else if (item.data) {
-        batch.set(ref, item.data);
+// Firestore enforces a hard limit of 20 get()/exists() security-rule evaluations
+// per writeBatch. Child collections (item_indices, tenders, tender_vendors,
+// pvc_results) perform 2 parent lookups per create, so chunk size 8 guarantees
+// at most 16 lookups per batch while staying fast via bounded concurrency.
+const ROOT_BATCH_CHUNK_SIZE = 200;
+const CHILD_BATCH_CHUNK_SIZE = 8;
+const BATCH_CONCURRENCY = 4;
+
+async function commitInChunks(
+  ops: BatchWriteItem[],
+  chunkSize: number = CHILD_BATCH_CHUNK_SIZE,
+  onChunkDone?: (count: number) => void
+): Promise<void> {
+  if (ops.length === 0) return;
+
+  const chunks: BatchWriteItem[][] = [];
+  for (let i = 0; i < ops.length; i += chunkSize) {
+    chunks.push(ops.slice(i, i + chunkSize));
+  }
+
+  let nextIdx = 0;
+  const workerCount = Math.min(BATCH_CONCURRENCY, chunks.length);
+
+  const runWorker = async (): Promise<void> => {
+    while (nextIdx < chunks.length) {
+      const idx = nextIdx++;
+      const slice = chunks[idx];
+      const batch = writeBatch(db);
+      for (const item of slice) {
+        const ref = doc(db, item.col, item.id);
+        if (item.op === 'delete') {
+          batch.delete(ref);
+        } else if (item.data) {
+          batch.set(ref, item.data);
+        }
+      }
+      try {
+        await batch.commit();
+        if (onChunkDone) onChunkDone(slice.length);
+      } catch (error) {
+        const firstPath = slice[0] ? `${slice[0].col}/${slice[0].id}` : null;
+        const opType = slice[0]?.op === 'delete' ? OperationType.DELETE : OperationType.WRITE;
+        handleFirestoreError(error, opType, firstPath);
       }
     }
-    try {
-      await batch.commit();
-    } catch (error) {
-      const firstPath = slice[0] ? `${slice[0].col}/${slice[0].id}` : null;
-      const opType = slice[0]?.op === 'delete' ? OperationType.DELETE : OperationType.WRITE;
-      handleFirestoreError(error, opType, firstPath);
-    }
-  }
+  };
+
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
 }
 
 async function fetchOwnedCollection(colName: string, uid: string): Promise<Map<string, DocumentData>> {
@@ -439,7 +467,7 @@ function firestoreToServerRecords(
 
   const pvcResults = Array.from(resultsMap.values()).map((d) => ({
     id: safeNum(d.numericId, 1),
-    user_id: 1,
+    user_id: 0,
     item_id: safeNum(d.item_id, 1),
     username: String(d.username || ''),
     created_at:
@@ -495,7 +523,8 @@ async function pushSnapshotToFirestore(
   existingVendors: Map<string, DocumentData>,
   existingResults: Map<string, DocumentData>,
   existingMeta: DocumentData | undefined,
-  targetRevision: number
+  targetRevision: number,
+  onProgress?: (done: number, total: number) => void
 ): Promise<void> {
   // Stage 1: Upsert Items first (parents of item_indices, tenders, pvc_results)
   const itemOps: BatchWriteItem[] = [];
@@ -513,7 +542,6 @@ async function pushSnapshotToFirestore(
       itemOps.push({ col: 'items', id: docId, data: payload, op: 'set' });
     }
   }
-  if (itemOps.length > 0) await commitInChunks(itemOps);
 
   // Stage 2: Upsert ItemIndices, Tenders, and PVCResults
   const stage2Ops: BatchWriteItem[] = [];
@@ -561,7 +589,6 @@ async function pushSnapshotToFirestore(
       stage2Ops.push({ col: 'pvc_results', id: docId, data: payload, op: 'set' });
     }
   }
-  if (stage2Ops.length > 0) await commitInChunks(stage2Ops);
 
   // Stage 3: Upsert TenderVendors (children of Tenders)
   const vendorOps: BatchWriteItem[] = [];
@@ -578,7 +605,6 @@ async function pushSnapshotToFirestore(
       vendorOps.push({ col: 'tender_vendors', id: docId, data: payload, op: 'set' });
     }
   }
-  if (vendorOps.length > 0) await commitInChunks(vendorOps);
 
   // Stage 4: Delete removed documents (children first, then parents)
   const deleteChildOps: BatchWriteItem[] = [];
@@ -591,19 +617,38 @@ async function pushSnapshotToFirestore(
   for (const oldId of existingResults.keys()) {
     if (!nextResultIds.has(oldId)) deleteChildOps.push({ col: 'pvc_results', id: oldId, op: 'delete' });
   }
-  if (deleteChildOps.length > 0) await commitInChunks(deleteChildOps);
 
   const deleteTenderOps: BatchWriteItem[] = [];
   for (const oldId of existingTenders.keys()) {
     if (!nextTenderIds.has(oldId)) deleteTenderOps.push({ col: 'tenders', id: oldId, op: 'delete' });
   }
-  if (deleteTenderOps.length > 0) await commitInChunks(deleteTenderOps);
 
   const deleteItemOps: BatchWriteItem[] = [];
   for (const oldId of existingItems.keys()) {
     if (!nextItemIds.has(oldId)) deleteItemOps.push({ col: 'items', id: oldId, op: 'delete' });
   }
-  if (deleteItemOps.length > 0) await commitInChunks(deleteItemOps);
+
+  const totalOps =
+    itemOps.length +
+    stage2Ops.length +
+    vendorOps.length +
+    deleteChildOps.length +
+    deleteTenderOps.length +
+    deleteItemOps.length +
+    1;
+  let completedOps = 0;
+  const reportChunk = (count: number): void => {
+    completedOps += count;
+    if (onProgress) onProgress(Math.min(completedOps, totalOps), totalOps);
+  };
+  if (onProgress) onProgress(0, totalOps);
+
+  if (itemOps.length > 0) await commitInChunks(itemOps, ROOT_BATCH_CHUNK_SIZE, reportChunk);
+  if (stage2Ops.length > 0) await commitInChunks(stage2Ops, CHILD_BATCH_CHUNK_SIZE, reportChunk);
+  if (vendorOps.length > 0) await commitInChunks(vendorOps, CHILD_BATCH_CHUNK_SIZE, reportChunk);
+  if (deleteChildOps.length > 0) await commitInChunks(deleteChildOps, CHILD_BATCH_CHUNK_SIZE, reportChunk);
+  if (deleteTenderOps.length > 0) await commitInChunks(deleteTenderOps, CHILD_BATCH_CHUNK_SIZE, reportChunk);
+  if (deleteItemOps.length > 0) await commitInChunks(deleteItemOps, ROOT_BATCH_CHUNK_SIZE, reportChunk);
 
   // Stage 5: Update workspace_meta/{uid}
   const metaPayload: Record<string, unknown> = {
@@ -613,175 +658,311 @@ async function pushSnapshotToFirestore(
     createdAt: existingMeta?.createdAt ?? serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
-  await commitInChunks([{ col: 'workspace_meta', id: uid, data: metaPayload, op: 'set' }]);
+  await commitInChunks([{ col: 'workspace_meta', id: uid, data: metaPayload, op: 'set' }], 1, reportChunk);
+}
+
+// ── Clean Alert / Active Bulk-Commit Feedback (Idle = Zero UI Noise) ──────
+function ensureCloudAlertContainer(): HTMLElement | null {
+  let container = document.getElementById('pvcCloudAlertHost');
+  if (container) return container;
+  const mainContainer = document.querySelector('main .container-xl');
+  if (!mainContainer) return null;
+  container = document.createElement('div');
+  container.id = 'pvcCloudAlertHost';
+  container.className = 'mb-3 d-print-none';
+  mainContainer.prepend(container);
+  return container;
+}
+
+function showCloudAlert(message: string, variant: 'danger' | 'warning' | 'info' | 'success' = 'danger', dismissible = true): void {
+  const host = ensureCloudAlertContainer();
+  if (!host) return;
+  host.innerHTML = '';
+  const alertEl = document.createElement('div');
+  alertEl.className = `alert alert-${variant}${dismissible ? ' alert-dismissible' : ''} fade show d-flex align-items-center gap-2 mb-0`;
+  alertEl.setAttribute('role', 'alert');
+
+  if (variant === 'info' && !dismissible) {
+    const spinner = document.createElement('span');
+    spinner.className = 'spinner-border spinner-border-sm flex-shrink-0';
+    spinner.setAttribute('aria-hidden', 'true');
+    alertEl.appendChild(spinner);
+  }
+
+  const textSpan = document.createElement('span');
+  textSpan.textContent = message;
+  alertEl.appendChild(textSpan);
+
+  if (dismissible) {
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'btn-close ms-auto';
+    closeBtn.setAttribute('data-bs-dismiss', 'alert');
+    closeBtn.setAttribute('aria-label', 'Close');
+    alertEl.appendChild(closeBtn);
+  }
+
+  host.appendChild(alertEl);
+}
+
+function clearCloudAlert(): void {
+  const host = document.getElementById('pvcCloudAlertHost');
+  if (host) host.innerHTML = '';
+}
+
+function formatSyncError(err: unknown): string {
+  if (err instanceof Error) {
+    try {
+      const parsed = JSON.parse(err.message) as { error?: string; path?: string };
+      if (parsed && parsed.error) {
+        return `Cloud database sync failed (${parsed.path || 'Firestore'}): ${parsed.error}`;
+      }
+    } catch {
+      // plain Error message
+    }
+    return `Cloud database sync failed: ${err.message}`;
+  }
+  return 'Cloud database sync failed. Please check your connection and try again.';
 }
 
 let syncInFlight = false;
+let activeSyncPromise: Promise<void> | null = null;
+let bulkSubmitInProgress = false;
 
-async function syncWithFirestore(user: User, reloadIfHydrated = true): Promise<void> {
-  if (syncInFlight || !user || !user.emailVerified) return;
-  syncInFlight = true;
+window.addEventListener('beforeunload', (e) => {
+  if (syncInFlight) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
 
-  try {
-    const snapResp = await fetch('/api/sync/snapshot', {
-      method: 'GET',
-      credentials: 'same-origin',
-      headers: getAuthHeaders(),
-    });
-    if (!snapResp.ok) {
-      return;
-    }
-    const snapshot = (await snapResp.json()) as SyncSnapshotResponse;
-    if (!snapshot.ok) return;
+interface SyncOptions {
+  forcePush?: boolean;
+  rethrow?: boolean;
+  onProgress?: (done: number, total: number) => void;
+}
 
-    const uid = user.uid;
-    const metaRef = doc(db, 'workspace_meta', uid);
-    let metaSnap;
+async function syncWithFirestore(user: User, reloadIfHydrated = true, options: SyncOptions = {}): Promise<void> {
+  if (!user || !user.emailVerified) return;
+
+  // If a background sync is already in progress when an explicit bulk save runs,
+  // wait for it to finish rather than dropping the bulk save sync.
+  if (activeSyncPromise) {
+    if (!options.forcePush) return;
     try {
-      metaSnap = await getDoc(metaRef);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.GET, `workspace_meta/${uid}`);
+      await activeSyncPromise;
+    } catch {
+      // continue with explicit forcePush
     }
+  }
 
-    const metaExists = Boolean(metaSnap && metaSnap.exists());
-    const metaData = metaExists ? metaSnap.data() : undefined;
-    const cloudRevision = safeNum(metaData?.revision, 0);
-
-    const [existingItems, existingIndices, existingTenders, existingVendors, existingResults] = await Promise.all([
-      fetchOwnedCollection('items', uid),
-      fetchOwnedCollection('item_indices', uid),
-      fetchOwnedCollection('tenders', uid),
-      fetchOwnedCollection('tender_vendors', uid),
-      fetchOwnedCollection('pvc_results', uid),
-    ]);
-
-    if (!metaExists || !metaData?.seeded) {
-      // First-time Firestore persistence: push current workspace to Firestore
-      const targetRev = Math.max(1, snapshot.revision);
-      await pushSnapshotToFirestore(
-        uid,
-        snapshot,
-        existingItems,
-        existingIndices,
-        existingTenders,
-        existingVendors,
-        existingResults,
-        metaData,
-        targetRev
-      );
-      await fetch('/api/sync/mark-synced', {
-        method: 'POST',
+  const run = async (): Promise<void> => {
+    syncInFlight = true;
+    try {
+      const snapResp = await fetch('/api/sync/snapshot', {
+        method: 'GET',
         credentials: 'same-origin',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ ownerUid: uid, revision: targetRev }),
       });
-      return;
-    }
+      if (!snapResp.ok) {
+        if (options.rethrow) {
+          throw new Error('Could not read workspace snapshot from server.');
+        }
+        return;
+      }
+      const snapshot = (await snapResp.json()) as SyncSnapshotResponse;
+      if (!snapshot.ok) return;
 
-    if (!snapshot.hydratedFromCloud || snapshot.cloudOwnerUid !== uid) {
-      // Fresh container / cold start: hydrate Express store from Firestore
-      const serverPayload = firestoreToServerRecords(
-        existingItems,
-        existingIndices,
-        existingTenders,
-        existingVendors,
-        existingResults
-      );
-      const hydResp = await fetch('/api/sync/hydrate', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          ownerUid: uid,
-          revision: cloudRevision,
-          ...serverPayload,
-        }),
-      });
-      if (hydResp.ok) {
-        const hydJson = (await hydResp.json()) as {
-          ok: boolean;
-          changed?: boolean;
-          needsPushBack?: boolean;
-          revision?: number;
-        };
-        if (hydJson.needsPushBack) {
-          const freshResp = await fetch('/api/sync/snapshot', {
-            method: 'GET',
-            credentials: 'same-origin',
-            headers: getAuthHeaders(),
-          });
-          if (freshResp.ok) {
-            const freshSnap = (await freshResp.json()) as SyncSnapshotResponse;
-            const targetRev = Math.max(cloudRevision + 1, freshSnap.revision);
-            await pushSnapshotToFirestore(
-              uid,
-              freshSnap,
-              existingItems,
-              existingIndices,
-              existingTenders,
-              existingVendors,
-              existingResults,
-              metaData,
-              targetRev
-            );
-            await fetch('/api/sync/mark-synced', {
-              method: 'POST',
+      const uid = user.uid;
+      const metaRef = doc(db, 'workspace_meta', uid);
+      let metaSnap;
+      try {
+        metaSnap = await getDoc(metaRef);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.GET, `workspace_meta/${uid}`);
+      }
+
+      const metaExists = Boolean(metaSnap && metaSnap.exists());
+      const metaData = metaExists ? metaSnap.data() : undefined;
+      const cloudRevision = safeNum(metaData?.revision, 0);
+
+      const [existingItems, existingIndices, existingTenders, existingVendors, existingResults] = await Promise.all([
+        fetchOwnedCollection('items', uid),
+        fetchOwnedCollection('item_indices', uid),
+        fetchOwnedCollection('tenders', uid),
+        fetchOwnedCollection('tender_vendors', uid),
+        fetchOwnedCollection('pvc_results', uid),
+      ]);
+
+      if (!metaExists || !metaData?.seeded) {
+        // First-time Firestore persistence: push current workspace to Firestore
+        const targetRev = Math.max(1, snapshot.revision);
+        await pushSnapshotToFirestore(
+          uid,
+          snapshot,
+          existingItems,
+          existingIndices,
+          existingTenders,
+          existingVendors,
+          existingResults,
+          metaData,
+          targetRev,
+          options.onProgress
+        );
+        await fetch('/api/sync/mark-synced', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ ownerUid: uid, revision: targetRev }),
+        });
+        return;
+      }
+
+      if (!snapshot.hydratedFromCloud || snapshot.cloudOwnerUid !== uid) {
+        // Fresh container / cold start: hydrate Express store from Firestore
+        // (Store merges ONLY explicitly dirty user uploads onto cloud records, never untouched defaults)
+        const serverPayload = firestoreToServerRecords(
+          existingItems,
+          existingIndices,
+          existingTenders,
+          existingVendors,
+          existingResults
+        );
+        const hydResp = await fetch('/api/sync/hydrate', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            ownerUid: uid,
+            revision: cloudRevision,
+            ...serverPayload,
+          }),
+        });
+        if (hydResp.ok) {
+          const hydJson = (await hydResp.json()) as {
+            ok: boolean;
+            changed?: boolean;
+            needsPushBack?: boolean;
+            revision?: number;
+          };
+          if (hydJson.needsPushBack || options.forcePush) {
+            const freshResp = await fetch('/api/sync/snapshot', {
+              method: 'GET',
               credentials: 'same-origin',
               headers: getAuthHeaders(),
-              body: JSON.stringify({ ownerUid: uid, revision: targetRev }),
             });
+            if (freshResp.ok) {
+              const freshSnap = (await freshResp.json()) as SyncSnapshotResponse;
+              const targetRev = Math.max(cloudRevision + 1, freshSnap.revision);
+              await pushSnapshotToFirestore(
+                uid,
+                freshSnap,
+                existingItems,
+                existingIndices,
+                existingTenders,
+                existingVendors,
+                existingResults,
+                metaData,
+                targetRev,
+                options.onProgress
+              );
+              await fetch('/api/sync/mark-synced', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ ownerUid: uid, revision: targetRev }),
+              });
+            }
           }
-        }
-        if (reloadIfHydrated && hydJson.changed) {
-          const guardKey = `pvc_hydrated_${uid}_${cloudRevision}`;
-          try {
-            if (!sessionStorage.getItem(guardKey)) {
-              sessionStorage.setItem(guardKey, '1');
+          if (reloadIfHydrated && hydJson.changed && !bulkSubmitInProgress) {
+            const bootKey = snapshot.bootId || 'default';
+            const guardKey = `pvc_hydrated_${bootKey}_${uid}`;
+            try {
+              if (!sessionStorage.getItem(guardKey)) {
+                sessionStorage.setItem(guardKey, '1');
+                window.location.reload();
+              }
+            } catch {
               window.location.reload();
             }
-          } catch {
-            window.location.reload();
           }
         }
+        return;
       }
-      return;
-    }
 
-    // Active hydrated session: if any mutation occurred (bulk indices upload, item/tender/vendor/calc update), push diff to Firestore
-    if (snapshot.revision > cloudRevision) {
-      await pushSnapshotToFirestore(
-        uid,
-        snapshot,
-        existingItems,
-        existingIndices,
-        existingTenders,
-        existingVendors,
-        existingResults,
-        metaData,
-        snapshot.revision
-      );
-      await fetch('/api/sync/mark-synced', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ ownerUid: uid, revision: snapshot.revision }),
-      });
+      // Active hydrated session: push diff to Firestore if any mutation occurred or forcePush requested
+      if (snapshot.revision > cloudRevision || options.forcePush) {
+        const targetRev = Math.max(snapshot.revision, cloudRevision + 1);
+        await pushSnapshotToFirestore(
+          uid,
+          snapshot,
+          existingItems,
+          existingIndices,
+          existingTenders,
+          existingVendors,
+          existingResults,
+          metaData,
+          targetRev,
+          options.onProgress
+        );
+        await fetch('/api/sync/mark-synced', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ ownerUid: uid, revision: targetRev }),
+        });
+      }
+    } catch (err) {
+      console.error('[PVC Cloud Sync]', err);
+      showCloudAlert(formatSyncError(err), 'danger', true);
+      if (options.rethrow) throw err;
+    } finally {
+      syncInFlight = false;
+      activeSyncPromise = null;
     }
-  } catch (err) {
-    console.error('[PVC Cloud Sync]', err);
-  } finally {
-    syncInFlight = false;
-  }
+  };
+
+  activeSyncPromise = run();
+  return activeSyncPromise;
 }
 
 function updateConnectButtonVisibility(user: User | null): void {
+  const isConnected = Boolean(user && user.emailVerified);
   const connectBtn = document.getElementById('btnConnectCloudDb');
-  if (!connectBtn) return;
-  if (user && user.emailVerified) {
-    connectBtn.classList.add('d-none');
-  } else {
-    connectBtn.classList.remove('d-none');
+  if (connectBtn) {
+    connectBtn.classList.toggle('d-none', isConnected);
   }
+  const noticeEl = document.getElementById('cloudAuthRequiredNotice');
+  if (noticeEl) {
+    noticeEl.classList.toggle('d-none', isConnected);
+  }
+}
+
+function appendFallbackTokenIfNeeded(targetUrl: string): string {
+  if (document.cookie.indexOf('pvc_ck=1') !== -1) return targetUrl;
+  try {
+    const token = sessionStorage.getItem('pvc_fallback_token') || '';
+    if (!token) return targetUrl;
+    const u = new URL(targetUrl, window.location.origin);
+    u.searchParams.set('_t', token);
+    return u.pathname + u.search + u.hash;
+  } catch {
+    return targetUrl;
+  }
+}
+
+async function ensureCloudSignedIn(): Promise<User> {
+  if (auth.currentUser && auth.currentUser.emailVerified) {
+    return auth.currentUser;
+  }
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  const cred = await signInWithPopup(auth, provider);
+  if (!cred.user || !cred.user.emailVerified) {
+    throw new Error('A verified Google account is required to store data in the Cloud Database.');
+  }
+  updateConnectButtonVisibility(cred.user);
+  return cred.user;
 }
 
 async function googleSignInFlow(nextUrl = '/'): Promise<void> {
@@ -844,18 +1025,23 @@ async function googleSignInFlow(nextUrl = '/'): Promise<void> {
 }
 
 async function connectCloudDbFlow(): Promise<void> {
-  const btn = document.getElementById('btnConnectCloudDb') as HTMLButtonElement | null;
-  if (btn) btn.disabled = true;
+  const btns = Array.from(document.querySelectorAll('#btnConnectCloudDb, [data-connect-cloud-db="1"]')) as HTMLButtonElement[];
+  btns.forEach((b) => {
+    b.disabled = true;
+  });
   try {
-    const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: 'select_account' });
-    const cred = await signInWithPopup(auth, provider);
-    updateConnectButtonVisibility(cred.user);
-    await syncWithFirestore(cred.user, true);
+    clearCloudAlert();
+    const user = await ensureCloudSignedIn();
+    showCloudAlert('Synchronizing with Cloud Database…', 'info', false);
+    await syncWithFirestore(user, true, { rethrow: true });
+    clearCloudAlert();
   } catch (err) {
     console.error('[PVC Connect Cloud DB]', err);
+    showCloudAlert(formatSyncError(err), 'danger', true);
   } finally {
-    if (btn) btn.disabled = false;
+    btns.forEach((b) => {
+      b.disabled = false;
+    });
   }
 }
 
@@ -866,6 +1052,111 @@ async function firebaseSignOutFlow(logoutHref: string): Promise<void> {
     // ignore
   }
   window.location.href = logoutHref;
+}
+
+function attachBulkCloudSyncInterceptor(): void {
+  // Bubble-phase document listener runs strictly AFTER form-level submit listeners
+  // that serialize spreadsheet grid / multi-item hidden JSON inputs.
+  document.addEventListener('submit', (e) => {
+    const target = e.target;
+    if (!(target instanceof HTMLFormElement)) return;
+    if (target.getAttribute('data-cloud-sync-form') !== '1') return;
+
+    e.preventDefault();
+
+    const submitButtons = Array.from(target.querySelectorAll('button[type="submit"], input[type="submit"]')) as Array<
+      HTMLButtonElement | HTMLInputElement
+    >;
+    const originalLabels = submitButtons.map((b) => (b instanceof HTMLButtonElement ? b.innerHTML : b.value));
+
+    const setBusy = (busy: boolean): void => {
+      submitButtons.forEach((b, idx) => {
+        b.disabled = busy;
+        if (b instanceof HTMLButtonElement) {
+          b.innerHTML = busy
+            ? '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Saving to Cloud…'
+            : originalLabels[idx];
+        }
+      });
+    };
+
+    void (async () => {
+      bulkSubmitInProgress = true;
+      setBusy(true);
+      clearCloudAlert();
+
+      try {
+        showCloudAlert('Verifying Cloud Database connection…', 'info', false);
+        const user = await ensureCloudSignedIn();
+
+        const actionUrl = target.getAttribute('action') || window.location.href;
+        const isMultipart = (target.getAttribute('enctype') || '').toLowerCase().includes('multipart/form-data');
+
+        const headers: Record<string, string> = { 'X-PVC-Ajax': '1' };
+        try {
+          const token = sessionStorage.getItem('pvc_fallback_token') || '';
+          if (token) headers['x-pvc-auth'] = token;
+        } catch {
+          // ignore
+        }
+
+        let body: BodyInit;
+        if (isMultipart) {
+          body = new FormData(target);
+        } else {
+          const fd = new FormData(target);
+          const params = new URLSearchParams();
+          fd.forEach((val, key) => {
+            if (typeof val === 'string') params.append(key, val);
+          });
+          headers['Content-Type'] = 'application/x-www-form-urlencoded;charset=UTF-8';
+          body = params.toString();
+        }
+
+        showCloudAlert('Processing uploaded records…', 'info', false);
+        const resp = await fetch(actionUrl, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers,
+          body,
+        });
+
+        let json: { ok?: boolean; error?: string; message?: string; redirectUrl?: string } = {};
+        try {
+          json = (await resp.json()) as typeof json;
+        } catch {
+          throw new Error(`Server returned HTTP ${resp.status} while processing bulk upload.`);
+        }
+
+        if (!resp.ok || !json.ok) {
+          throw new Error(json.error || 'Bulk upload could not be processed.');
+        }
+
+        showCloudAlert('Saving uploaded data to Cloud Database…', 'info', false);
+        await syncWithFirestore(user, false, {
+          forcePush: true,
+          rethrow: true,
+          onProgress: (done, total) => {
+            showCloudAlert(`Saving uploaded data to Cloud Database (${done} / ${total})…`, 'info', false);
+          },
+        });
+
+        clearCloudAlert();
+        bulkSubmitInProgress = false;
+        const nextUrl = appendFallbackTokenIfNeeded(json.redirectUrl || window.location.href);
+        window.location.assign(nextUrl);
+      } catch (err) {
+        console.error('[PVC Bulk Cloud Save]', err);
+        showCloudAlert(
+          err instanceof Error ? err.message : 'Failed to save bulk data to Cloud Database.',
+          'danger',
+          true
+        );
+        bulkSubmitInProgress = false;
+        setBusy(false);
+      }
+    })();
+  });
 }
 
 declare global {
@@ -892,12 +1183,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  const connectBtn = document.getElementById('btnConnectCloudDb');
-  if (connectBtn) {
-    connectBtn.addEventListener('click', () => {
+  document.querySelectorAll('#btnConnectCloudDb, [data-connect-cloud-db="1"]').forEach((btn) => {
+    btn.addEventListener('click', () => {
       void connectCloudDbFlow();
     });
-  }
+  });
 
   const logoutLink = document.getElementById('pvcLogoutLink');
   if (logoutLink) {
@@ -908,9 +1198,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  if (isAuthenticatedPage) {
+    attachBulkCloudSyncInterceptor();
+  }
+
   onAuthStateChanged(auth, (user) => {
     updateConnectButtonVisibility(user);
-    if (isAuthenticatedPage && user && user.emailVerified) {
+    if (isAuthenticatedPage && user && user.emailVerified && !bulkSubmitInProgress) {
       void syncWithFirestore(user, true);
     }
   });

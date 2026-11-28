@@ -246,11 +246,41 @@ const bulkSheetUpload = multer({
   limits: { fileSize: 10 * 1024 * 1024, files: 1 },
 });
 
+function respondBulk(
+  req: Request,
+  res: Response,
+  opts: {
+    ok: boolean;
+    message: string;
+    category?: 'success' | 'danger' | 'warning' | 'info';
+    redirectUrl: string;
+    status?: number;
+  }
+): void {
+  const isAjax = req.headers['x-pvc-ajax'] === '1';
+  if (opts.ok) {
+    flashMessage(req, opts.message, opts.category || 'success');
+    if (isAjax) {
+      res.status(200).json({ ok: true, message: opts.message, redirectUrl: opts.redirectUrl });
+      return;
+    }
+    res.redirect(opts.redirectUrl);
+    return;
+  }
+  if (isAjax) {
+    res.status(opts.status || 400).json({ ok: false, error: opts.message });
+    return;
+  }
+  flashMessage(req, opts.message, opts.category || 'danger');
+  res.redirect(opts.redirectUrl);
+}
+
 function handleBulkSheetUpload(req: Request, res: Response, next: NextFunction): void {
   bulkSheetUpload.single('bulk_file')(req, res, (err: unknown) => {
     if (err) {
-      flashMessage(req, err instanceof Error ? err.message : 'File upload failed.', 'danger');
-      res.redirect('/admin/indices/bulk');
+      const msg = err instanceof Error ? err.message : 'File upload failed.';
+      const fallbackRedirect = req.originalUrl.includes('/tenders/') ? '/admin/tenders/bulk' : '/admin/indices/bulk';
+      respondBulk(req, res, { ok: false, message: msg, category: 'danger', redirectUrl: fallbackRedirect, status: 400 });
       return;
     }
     next();
@@ -805,8 +835,7 @@ adminRouter.post('/indices/bulk/save', (req, res) => {
   const itemId = parseInt(String(req.body.itemid || ''), 10);
   const item = store.getItemById(itemId);
   if (!item) {
-    flashMessage(req, 'Please select a valid item.', 'danger');
-    res.redirect('/admin/indices/bulk');
+    respondBulk(req, res, { ok: false, message: 'Please select a valid item.', category: 'danger', redirectUrl: '/admin/indices/bulk' });
     return;
   }
 
@@ -818,8 +847,7 @@ adminRouter.post('/indices/bulk/save', (req, res) => {
     if (!Array.isArray(raw)) throw new Error('Not array');
     parsedRows = raw;
   } catch {
-    flashMessage(req, 'Invalid bulk indices payload.', 'danger');
-    res.redirect(`/admin/indices/bulk?itemid=${item.id}`);
+    respondBulk(req, res, { ok: false, message: 'Invalid bulk indices payload.', category: 'danger', redirectUrl: `/admin/indices/bulk?itemid=${item.id}` });
     return;
   }
 
@@ -854,8 +882,7 @@ adminRouter.post('/indices/bulk/save', (req, res) => {
   }
 
   if (created === 0 && updated === 0) {
-    flashMessage(req, 'No valid monthly index rows found to save.', 'warning');
-    res.redirect(`/admin/indices/bulk?itemid=${item.id}`);
+    respondBulk(req, res, { ok: false, message: 'No valid monthly index rows found to save.', category: 'warning', redirectUrl: `/admin/indices/bulk?itemid=${item.id}` });
     return;
   }
 
@@ -863,22 +890,24 @@ adminRouter.post('/indices/bulk/save', (req, res) => {
   if (created > 0) parts.push(`${created} month(s) created`);
   if (updated > 0) parts.push(`${updated} month(s) updated`);
   if (skipped > 0) parts.push(`${skipped} skipped`);
-  flashMessage(req, `Bulk update for ${item.name}: ${parts.join(', ')}.`, 'success');
-  res.redirect(`/admin/items/${item.id}/indices`);
+  respondBulk(req, res, {
+    ok: true,
+    message: `Bulk update for ${item.name}: ${parts.join(', ')}.`,
+    category: 'success',
+    redirectUrl: `/admin/items/${item.id}/indices`,
+  });
 });
 
 adminRouter.post('/indices/bulk/upload', handleBulkSheetUpload, (req, res) => {
   const itemId = parseInt(String(req.body.itemid || ''), 10);
   const item = store.getItemById(itemId);
   if (!item) {
-    flashMessage(req, 'Please select a valid item.', 'danger');
-    res.redirect('/admin/indices/bulk');
+    respondBulk(req, res, { ok: false, message: 'Please select a valid item.', category: 'danger', redirectUrl: '/admin/indices/bulk' });
     return;
   }
   const file = req.file;
   if (!file || !file.buffer) {
-    flashMessage(req, 'Please choose an Excel (.xlsx / .xls) or CSV file.', 'danger');
-    res.redirect(`/admin/indices/bulk?itemid=${item.id}`);
+    respondBulk(req, res, { ok: false, message: 'Please choose an Excel (.xlsx / .xls) or CSV file.', category: 'danger', redirectUrl: `/admin/indices/bulk?itemid=${item.id}` });
     return;
   }
 
@@ -889,14 +918,12 @@ adminRouter.post('/indices/bulk/upload', handleBulkSheetUpload, (req, res) => {
     const wb = XLSX.read(file.buffer, { type: 'buffer', cellDates: false });
     const firstSheetName = wb.SheetNames[0];
     if (!firstSheetName) {
-      flashMessage(req, 'Uploaded file contains no sheets.', 'danger');
-      res.redirect(`/admin/indices/bulk?itemid=${item.id}`);
+      respondBulk(req, res, { ok: false, message: 'Uploaded file contains no sheets.', category: 'danger', redirectUrl: `/admin/indices/bulk?itemid=${item.id}` });
       return;
     }
     const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[firstSheetName], { defval: '' });
     if (!rows.length) {
-      flashMessage(req, 'Uploaded sheet has no data rows.', 'warning');
-      res.redirect(`/admin/indices/bulk?itemid=${item.id}`);
+      respondBulk(req, res, { ok: false, message: 'Uploaded sheet has no data rows.', category: 'warning', redirectUrl: `/admin/indices/bulk?itemid=${item.id}` });
       return;
     }
 
@@ -945,8 +972,7 @@ adminRouter.post('/indices/bulk/upload', handleBulkSheetUpload, (req, res) => {
     }
 
     if (created === 0 && updated === 0) {
-      flashMessage(req, 'No valid month rows found in uploaded file.', 'warning');
-      res.redirect(`/admin/indices/bulk?itemid=${item.id}`);
+      respondBulk(req, res, { ok: false, message: 'No valid month rows found in uploaded file.', category: 'warning', redirectUrl: `/admin/indices/bulk?itemid=${item.id}` });
       return;
     }
 
@@ -954,19 +980,26 @@ adminRouter.post('/indices/bulk/upload', handleBulkSheetUpload, (req, res) => {
     if (created > 0) parts.push(`${created} created`);
     if (updated > 0) parts.push(`${updated} updated`);
     if (skipped > 0) parts.push(`${skipped} skipped`);
-    flashMessage(req, `Imported ${file.originalname} for ${item.name}: ${parts.join(', ')}.`, 'success');
-    res.redirect(`/admin/items/${item.id}/indices`);
+    respondBulk(req, res, {
+      ok: true,
+      message: `Imported ${file.originalname} for ${item.name}: ${parts.join(', ')}.`,
+      category: 'success',
+      redirectUrl: `/admin/items/${item.id}/indices`,
+    });
   } catch (err) {
-    flashMessage(req, `Failed to parse file: ${err instanceof Error ? err.message : 'Unknown error'}`, 'danger');
-    res.redirect(`/admin/indices/bulk?itemid=${item.id}`);
+    respondBulk(req, res, {
+      ok: false,
+      message: `Failed to parse file: ${err instanceof Error ? err.message : 'Unknown error'}`,
+      category: 'danger',
+      redirectUrl: `/admin/indices/bulk?itemid=${item.id}`,
+    });
   }
 });
 
 adminRouter.post('/indices/bulk/month', (req, res) => {
   const monthStart = parseFlexibleMonthStart(req.body.month);
   if (!monthStart) {
-    flashMessage(req, 'Please select a valid month (YYYY-MM).', 'danger');
-    res.redirect('/admin/indices/bulk');
+    respondBulk(req, res, { ok: false, message: 'Please select a valid month (YYYY-MM).', category: 'danger', redirectUrl: '/admin/indices/bulk' });
     return;
   }
 
@@ -976,8 +1009,7 @@ adminRouter.post('/indices/bulk/month', (req, res) => {
     if (!Array.isArray(raw)) throw new Error('Invalid payload');
     itemsPayload = raw;
   } catch {
-    flashMessage(req, 'Invalid multi-item update payload.', 'danger');
-    res.redirect('/admin/indices/bulk');
+    respondBulk(req, res, { ok: false, message: 'Invalid multi-item update payload.', category: 'danger', redirectUrl: '/admin/indices/bulk' });
     return;
   }
 
@@ -1003,17 +1035,16 @@ adminRouter.post('/indices/bulk/month', (req, res) => {
   }
 
   if (created === 0 && updated === 0) {
-    flashMessage(req, 'No items selected or no valid values provided.', 'warning');
-    res.redirect('/admin/indices/bulk');
+    respondBulk(req, res, { ok: false, message: 'No items selected or no valid values provided.', category: 'warning', redirectUrl: '/admin/indices/bulk' });
     return;
   }
 
-  flashMessage(
-    req,
-    `Month ${monthStart.slice(0, 7)} updated across ${created + updated} item(s) (${created} created, ${updated} updated).`,
-    'success'
-  );
-  res.redirect('/admin/indices/bulk');
+  respondBulk(req, res, {
+    ok: true,
+    message: `Month ${monthStart.slice(0, 7)} updated across ${created + updated} item(s) (${created} created, ${updated} updated).`,
+    category: 'success',
+    redirectUrl: '/admin/indices/bulk',
+  });
 });
 
 // ── Tenders ───────────────────────────────────────────────────────────────
@@ -1382,8 +1413,7 @@ adminRouter.get('/tenders/bulk/template', (_req, res) => {
 adminRouter.post('/tenders/bulk/upload', handleBulkSheetUpload, (req, res) => {
   const file = req.file;
   if (!file || !file.buffer) {
-    flashMessage(req, 'Please choose an Excel (.xlsx / .xls) or CSV file.', 'danger');
-    res.redirect('/admin/tenders/bulk');
+    respondBulk(req, res, { ok: false, message: 'Please choose an Excel (.xlsx / .xls) or CSV file.', category: 'danger', redirectUrl: '/admin/tenders/bulk' });
     return;
   }
 
@@ -1395,14 +1425,12 @@ adminRouter.post('/tenders/bulk/upload', handleBulkSheetUpload, (req, res) => {
     const wb = XLSX.read(file.buffer, { type: 'buffer', cellDates: false });
     const firstSheetName = wb.SheetNames[0];
     if (!firstSheetName) {
-      flashMessage(req, 'Uploaded file contains no sheets.', 'danger');
-      res.redirect('/admin/tenders/bulk');
+      respondBulk(req, res, { ok: false, message: 'Uploaded file contains no sheets.', category: 'danger', redirectUrl: '/admin/tenders/bulk' });
       return;
     }
     const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[firstSheetName], { defval: '' });
     if (!rawRows.length) {
-      flashMessage(req, 'Uploaded sheet has no data rows.', 'warning');
-      res.redirect('/admin/tenders/bulk');
+      respondBulk(req, res, { ok: false, message: 'Uploaded sheet has no data rows.', category: 'warning', redirectUrl: '/admin/tenders/bulk' });
       return;
     }
 
@@ -1435,8 +1463,7 @@ adminRouter.post('/tenders/bulk/upload', handleBulkSheetUpload, (req, res) => {
       stats.vendorsCreated === 0 &&
       stats.vendorsUpdated === 0
     ) {
-      flashMessage(req, 'No valid tender or vendor rows found in the uploaded file.', 'warning');
-      res.redirect('/admin/tenders/bulk');
+      respondBulk(req, res, { ok: false, message: 'No valid tender or vendor rows found in the uploaded file.', category: 'warning', redirectUrl: '/admin/tenders/bulk' });
       return;
     }
 
@@ -1447,11 +1474,19 @@ adminRouter.post('/tenders/bulk/upload', handleBulkSheetUpload, (req, res) => {
     if (stats.vendorsUpdated > 0) parts.push(`${stats.vendorsUpdated} vendor(s) updated`);
     if (stats.skipped > 0) parts.push(`${stats.skipped} row(s) skipped`);
 
-    flashMessage(req, `Imported ${file.originalname}: ${parts.join(', ')}.`, 'success');
-    res.redirect('/admin/tenders');
+    respondBulk(req, res, {
+      ok: true,
+      message: `Imported ${file.originalname}: ${parts.join(', ')}.`,
+      category: 'success',
+      redirectUrl: '/admin/tenders',
+    });
   } catch (err) {
-    flashMessage(req, `Failed to parse file: ${err instanceof Error ? err.message : 'Unknown error'}`, 'danger');
-    res.redirect('/admin/tenders/bulk');
+    respondBulk(req, res, {
+      ok: false,
+      message: `Failed to parse file: ${err instanceof Error ? err.message : 'Unknown error'}`,
+      category: 'danger',
+      redirectUrl: '/admin/tenders/bulk',
+    });
   }
 });
 
@@ -1466,8 +1501,7 @@ adminRouter.post('/tenders/bulk/save', (req, res) => {
     if (!Array.isArray(parsed)) throw new Error('Invalid payload');
     rows = parsed;
   } catch {
-    flashMessage(req, 'Invalid bulk tender & vendor payload.', 'danger');
-    res.redirect('/admin/tenders/bulk');
+    respondBulk(req, res, { ok: false, message: 'Invalid bulk tender & vendor payload.', category: 'danger', redirectUrl: '/admin/tenders/bulk' });
     return;
   }
 
@@ -1478,8 +1512,7 @@ adminRouter.post('/tenders/bulk/save', (req, res) => {
     stats.vendorsCreated === 0 &&
     stats.vendorsUpdated === 0
   ) {
-    flashMessage(req, 'No valid tender or vendor rows found to save.', 'warning');
-    res.redirect('/admin/tenders/bulk');
+    respondBulk(req, res, { ok: false, message: 'No valid tender or vendor rows found to save.', category: 'warning', redirectUrl: '/admin/tenders/bulk' });
     return;
   }
 
@@ -1490,8 +1523,12 @@ adminRouter.post('/tenders/bulk/save', (req, res) => {
   if (stats.vendorsUpdated > 0) parts.push(`${stats.vendorsUpdated} vendor(s) updated`);
   if (stats.skipped > 0) parts.push(`${stats.skipped} row(s) skipped`);
 
-  flashMessage(req, `Bulk save completed: ${parts.join(', ')}.`, 'success');
-  res.redirect('/admin/tenders');
+  respondBulk(req, res, {
+    ok: true,
+    message: `Bulk save completed: ${parts.join(', ')}.`,
+    category: 'success',
+    redirectUrl: '/admin/tenders',
+  });
 });
 
 adminRouter.get('/tenders/new', (_req, res) => {

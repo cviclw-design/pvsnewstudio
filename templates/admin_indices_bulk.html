@@ -14,6 +14,13 @@
   </div>
 </div>
 
+<div id="cloudAuthRequiredNotice" class="alert alert-warning d-none d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3" role="alert">
+  <div><i class="bi bi-cloud-slash me-2"></i><strong>Cloud Database Not Connected</strong></div>
+  <button type="button" class="btn btn-sm btn-warning fw-semibold" data-connect-cloud-db="1">
+    <i class="bi bi-google me-1"></i>Connect Cloud DB
+  </button>
+</div>
+
 {% if items and items | length > 0 %}
 <!-- Interactive Mode Switcher -->
 <ul class="nav nav-tabs mb-4" id="bulkModeTabs" role="tablist">
@@ -38,7 +45,7 @@
 
   <!-- ═══ TAB 1: INTERACTIVE SPREADSHEET GRID ═══ -->
   <div class="tab-pane fade show active" id="pane-grid" role="tabpanel">
-    <form id="bulkGridForm" method="post" action="{{ url_for('admin.indices_bulk_save') }}">
+    <form id="bulkGridForm" method="post" action="{{ url_for('admin.indices_bulk_save') }}" data-cloud-sync-form="1">
       <input type="hidden" name="rows_json" id="bulkRowsJson" value="[]">
 
       <div class="card">
@@ -113,7 +120,7 @@
 
   <!-- ═══ TAB 2: EXCEL / CSV IMPORT ═══ -->
   <div class="tab-pane fade" id="pane-excel" role="tabpanel">
-    <form method="post" action="{{ url_for('admin.indices_bulk_upload') }}" enctype="multipart/form-data">
+    <form method="post" action="{{ url_for('admin.indices_bulk_upload') }}" enctype="multipart/form-data" data-cloud-sync-form="1">
       <div class="card">
         <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
           <h6 class="fw-bold mb-0"><i class="bi bi-file-earmark-arrow-up me-2 text-primary"></i>Excel / CSV Batch Upload</h6>
@@ -166,7 +173,7 @@
 
   <!-- ═══ TAB 3: MULTI-ITEM SINGLE MONTH UPDATE ═══ -->
   <div class="tab-pane fade" id="pane-multi" role="tabpanel">
-    <form id="multiMonthForm" method="post" action="{{ url_for('admin.indices_bulk_month_save') }}">
+    <form id="multiMonthForm" method="post" action="{{ url_for('admin.indices_bulk_month_save') }}" data-cloud-sync-form="1">
       <input type="hidden" name="items_payload_json" id="multiItemsPayload" value="[]">
 
       <div class="card">

@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import fs from 'fs';
 import bcrypt from 'bcryptjs';
 import {
@@ -308,10 +309,17 @@ function createInitialState(): StoreState {
 }
 
 class MemoryStore {
+  private readonly bootId = crypto.randomBytes(8).toString('hex');
   private state: StoreState;
   private mutationRevision = 0;
   private hydratedFromCloud = false;
   private cloudOwnerUid: string | null = null;
+  private dirtyItemIds = new Set<number>();
+  private dirtyIndexKeys = new Set<string>();
+  private dirtyTenderNos = new Set<string>();
+  private dirtyVendorKeys = new Set<string>();
+  private dirtyResultIds = new Set<number>();
+  private hasDirtyDeletes = false;
 
   constructor() {
     this.state = this.load();
@@ -395,6 +403,7 @@ class MemoryStore {
 
   // ── Cloud Sync Bridge (Firestore <-> Store) ───────────────────────────
   getSyncSnapshot(): {
+    bootId: string;
     revision: number;
     hydratedFromCloud: boolean;
     cloudOwnerUid: string | null;
@@ -405,6 +414,7 @@ class MemoryStore {
     pvcResults: PVCResultRecord[];
   } {
     return {
+      bootId: this.bootId,
       revision: this.mutationRevision,
       hydratedFromCloud: this.hydratedFromCloud,
       cloudOwnerUid: this.cloudOwnerUid,
@@ -422,6 +432,23 @@ class MemoryStore {
     if (Number.isFinite(revision) && revision > this.mutationRevision) {
       this.mutationRevision = revision;
     }
+    this.dirtyItemIds.clear();
+    this.dirtyIndexKeys.clear();
+    this.dirtyTenderNos.clear();
+    this.dirtyVendorKeys.clear();
+    this.dirtyResultIds.clear();
+    this.hasDirtyDeletes = false;
+  }
+
+  private hasDirtyLocalMutations(): boolean {
+    return (
+      this.dirtyItemIds.size > 0 ||
+      this.dirtyIndexKeys.size > 0 ||
+      this.dirtyTenderNos.size > 0 ||
+      this.dirtyVendorKeys.size > 0 ||
+      this.dirtyResultIds.size > 0 ||
+      this.hasDirtyDeletes
+    );
   }
 
   hydrateFromCloud(payload: {
@@ -448,71 +475,132 @@ class MemoryStore {
       return { changed: false, needsPushBack: true, revision: this.mutationRevision };
     }
 
-    const hadLocalUnsyncedMutations = !this.hydratedFromCloud && this.mutationRevision > 0;
+    const hadLocalUnsyncedMutations = !this.hydratedFromCloud && this.hasDirtyLocalMutations();
     const beforeFingerprint = JSON.stringify({
-      items: this.state.items.length,
-      idx: this.state.itemIndices.length,
-      tnd: this.state.tenders.length,
-      vnd: this.state.tenderVendors.length,
-      res: this.state.pvcResults.length,
+      items: this.state.items,
+      itemIndices: this.state.itemIndices.map((r) => ({ id: r.id, item_id: r.item_id, month: r.month, indices_json: r.indices_json })),
+      tenders: this.state.tenders,
+      tenderVendors: this.state.tenderVendors,
+      pvcResults: this.state.pvcResults.length,
     });
 
+    const maxId = (arr: Array<{ id: number }>) => arr.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0);
+
+    // Always start from Firestore cloud records as the authoritative base.
+    // Never let untouched container seed defaults overwrite cloud-persisted data.
+    const normalizedCloudItems: ItemRecord[] = cloudItems.map((it) => ({
+      ...it,
+      lag_months: it.lag_months ?? 1,
+      base_lag_months: it.base_lag_months ?? 0,
+      fixed_weight: it.fixed_weight ?? 15,
+      index_source: it.index_source ?? 'IEEMA',
+    }));
+    const normalizedCloudIndices: ItemIndexRecord[] = cloudIndices.map((idx) => ({
+      ...idx,
+      attachments: Array.isArray(idx.attachments) ? idx.attachments : [],
+    }));
+    const normalizedCloudTenders: TenderMasterRecord[] = cloudTenders.map((t) => ({
+      ...t,
+      freightrateperunit: t.freightrateperunit ?? 0,
+      gst_rate: t.gst_rate ?? 18,
+    }));
+    const normalizedCloudVendors: TenderVendorRecord[] = [...cloudVendors];
+    const normalizedCloudResults: PVCResultRecord[] = cloudResults.map((r) => ({
+      ...r,
+      user_id: r.user_id || payload.defaultUserId,
+    }));
+
     if (!hadLocalUnsyncedMutations) {
-      // Cold-start container or fresh sync: Firestore is authoritative
-      this.state.items = cloudItems.map((it) => ({
-        ...it,
-        lag_months: it.lag_months ?? 1,
-        base_lag_months: it.base_lag_months ?? 0,
-        fixed_weight: it.fixed_weight ?? 15,
-        index_source: it.index_source ?? 'IEEMA',
-      }));
-      this.state.itemIndices = cloudIndices.map((idx) => ({
-        ...idx,
-        attachments: Array.isArray(idx.attachments) ? idx.attachments : [],
-      }));
-      this.state.tenders = cloudTenders.map((t) => ({
-        ...t,
-        freightrateperunit: t.freightrateperunit ?? 0,
-        gst_rate: t.gst_rate ?? 18,
-      }));
-      this.state.tenderVendors = cloudVendors;
-      this.state.pvcResults = cloudResults.map((r) => ({
-        ...r,
-        user_id: r.user_id || payload.defaultUserId,
-      }));
+      this.state.items = normalizedCloudItems;
+      this.state.itemIndices = normalizedCloudIndices;
+      this.state.tenders = normalizedCloudTenders;
+      this.state.tenderVendors = normalizedCloudVendors;
+      this.state.pvcResults = normalizedCloudResults;
       this.mutationRevision = Math.max(1, Number(payload.revision) || 1);
     } else {
-      // Merge cloud records with unsynced local uploads (local edits win on conflicts so nothing is lost)
+      // Overlay ONLY records explicitly created/updated by the user since process boot.
       const itemMap = new Map<number, ItemRecord>();
-      for (const it of cloudItems) itemMap.set(it.id, it);
-      for (const it of this.state.items) itemMap.set(it.id, it);
+      for (const it of normalizedCloudItems) itemMap.set(it.id, it);
+      for (const it of this.state.items) {
+        if (this.dirtyItemIds.has(it.id)) {
+          itemMap.set(it.id, it);
+        }
+      }
       this.state.items = Array.from(itemMap.values());
 
+      let nextIndexId = Math.max(this.state.nextIds.itemIndices, maxId(normalizedCloudIndices) + 1);
       const idxMap = new Map<string, ItemIndexRecord>();
-      for (const idx of cloudIndices) idxMap.set(`${idx.item_id}::${idx.month}`, { ...idx, attachments: idx.attachments || [] });
-      for (const idx of this.state.itemIndices) idxMap.set(`${idx.item_id}::${idx.month}`, idx);
+      for (const idx of normalizedCloudIndices) {
+        idxMap.set(`${idx.item_id}::${idx.month}`, idx);
+      }
+      for (const idx of this.state.itemIndices) {
+        const key = `${idx.item_id}::${idx.month}`;
+        if (this.dirtyIndexKeys.has(key)) {
+          const existingCloud = idxMap.get(key);
+          idxMap.set(key, {
+            ...idx,
+            id: existingCloud ? existingCloud.id : nextIndexId++,
+          });
+        }
+      }
       this.state.itemIndices = Array.from(idxMap.values());
 
+      let nextTenderId = Math.max(this.state.nextIds.tenders, maxId(normalizedCloudTenders) + 1);
       const tenderMap = new Map<string, TenderMasterRecord>();
-      for (const t of cloudTenders) tenderMap.set(t.tender_no.trim().toLowerCase(), t);
-      for (const t of this.state.tenders) tenderMap.set(t.tender_no.trim().toLowerCase(), t);
+      for (const t of normalizedCloudTenders) {
+        tenderMap.set(t.tender_no.trim().toLowerCase(), t);
+      }
+      const localTenderIdToFinalId = new Map<number, number>();
+      for (const t of this.state.tenders) {
+        const key = t.tender_no.trim().toLowerCase();
+        const existingCloud = tenderMap.get(key);
+        if (this.dirtyTenderNos.has(key)) {
+          const finalId = existingCloud ? existingCloud.id : nextTenderId++;
+          localTenderIdToFinalId.set(t.id, finalId);
+          tenderMap.set(key, { ...t, id: finalId });
+        } else if (existingCloud) {
+          localTenderIdToFinalId.set(t.id, existingCloud.id);
+        }
+      }
       this.state.tenders = Array.from(tenderMap.values());
 
+      let nextVendorId = Math.max(this.state.nextIds.tenderVendors, maxId(normalizedCloudVendors) + 1);
       const vendorMap = new Map<string, TenderVendorRecord>();
-      for (const v of cloudVendors) vendorMap.set(`${v.tender_id}::${v.vendor_name.trim().toLowerCase()}`, v);
-      for (const v of this.state.tenderVendors) vendorMap.set(`${v.tender_id}::${v.vendor_name.trim().toLowerCase()}`, v);
+      for (const v of normalizedCloudVendors) {
+        vendorMap.set(`${v.tender_id}::${v.vendor_name.trim().toLowerCase()}`, v);
+      }
+      for (const v of this.state.tenderVendors) {
+        const localKey = `${v.tender_id}::${v.vendor_name.trim().toLowerCase()}`;
+        if (this.dirtyVendorKeys.has(localKey)) {
+          const mappedTenderId = localTenderIdToFinalId.get(v.tender_id);
+          if (mappedTenderId !== undefined) {
+            const finalKey = `${mappedTenderId}::${v.vendor_name.trim().toLowerCase()}`;
+            const existingCloud = vendorMap.get(finalKey);
+            vendorMap.set(finalKey, {
+              ...v,
+              id: existingCloud ? existingCloud.id : nextVendorId++,
+              tender_id: mappedTenderId,
+            });
+          }
+        }
+      }
       this.state.tenderVendors = Array.from(vendorMap.values());
 
+      let nextResultId = Math.max(this.state.nextIds.pvcResults, maxId(normalizedCloudResults) + 1);
       const resMap = new Map<number, PVCResultRecord>();
-      for (const r of cloudResults) resMap.set(r.id, { ...r, user_id: r.user_id || payload.defaultUserId });
-      for (const r of this.state.pvcResults) resMap.set(r.id, r);
+      for (const r of normalizedCloudResults) resMap.set(r.id, r);
+      for (const r of this.state.pvcResults) {
+        if (this.dirtyResultIds.has(r.id)) {
+          const finalId = resMap.has(r.id) ? nextResultId++ : r.id;
+          resMap.set(finalId, { ...r, id: finalId, user_id: r.user_id || payload.defaultUserId });
+        }
+      }
       this.state.pvcResults = Array.from(resMap.values());
 
       this.mutationRevision = Math.max(this.mutationRevision, Number(payload.revision) || 0) + 1;
     }
 
     // Recompute safe nextIds so future creates never collide
-    const maxId = (arr: Array<{ id: number }>) => arr.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0);
     this.state.nextIds.items = Math.max(this.state.nextIds.items, maxId(this.state.items) + 1);
     this.state.nextIds.itemIndices = Math.max(this.state.nextIds.itemIndices, maxId(this.state.itemIndices) + 1);
     this.state.nextIds.tenders = Math.max(this.state.nextIds.tenders, maxId(this.state.tenders) + 1);
@@ -524,15 +612,15 @@ class MemoryStore {
     this.persist();
 
     const afterFingerprint = JSON.stringify({
-      items: this.state.items.length,
-      idx: this.state.itemIndices.length,
-      tnd: this.state.tenders.length,
-      vnd: this.state.tenderVendors.length,
-      res: this.state.pvcResults.length,
+      items: this.state.items,
+      itemIndices: this.state.itemIndices.map((r) => ({ id: r.id, item_id: r.item_id, month: r.month, indices_json: r.indices_json })),
+      tenders: this.state.tenders,
+      tenderVendors: this.state.tenderVendors,
+      pvcResults: this.state.pvcResults.length,
     });
 
     return {
-      changed: !hadLocalUnsyncedMutations || beforeFingerprint !== afterFingerprint,
+      changed: beforeFingerprint !== afterFingerprint,
       needsPushBack: hadLocalUnsyncedMutations,
       revision: this.mutationRevision,
     };
@@ -602,6 +690,7 @@ class MemoryStore {
   createItem(input: Omit<ItemRecord, 'id'>, actorId: number | null = null): ItemRecord {
     const item: ItemRecord = { id: this.state.nextIds.items++, ...input };
     this.state.items.push(item);
+    this.dirtyItemIds.add(item.id);
     this.logAudit(actorId, 'INSERT', 'item', item.id, null, item);
     return item;
   }
@@ -611,6 +700,7 @@ class MemoryStore {
     if (!item) return undefined;
     const oldSnap = { ...item };
     Object.assign(item, patch);
+    this.dirtyItemIds.add(item.id);
     this.logAudit(actorId, 'UPDATE', 'item', item.id, oldSnap, item);
     return item;
   }
@@ -625,6 +715,7 @@ class MemoryStore {
     if (idx === -1) return { ok: false, error: 'Item not found.' };
     const [removed] = this.state.items.splice(idx, 1);
     this.state.itemIndices = this.state.itemIndices.filter((r) => r.item_id !== id);
+    this.hasDirtyDeletes = true;
     this.logAudit(actorId, 'DELETE', 'item', id, removed, null);
     return { ok: true };
   }
@@ -651,6 +742,7 @@ class MemoryStore {
       ...input,
     };
     this.state.itemIndices.push(row);
+    this.dirtyIndexKeys.add(`${row.item_id}::${row.month}`);
     this.logAudit(actorId, 'INSERT', 'item_index', row.id, null, row);
     return row;
   }
@@ -666,6 +758,7 @@ class MemoryStore {
     const oldSnap = { ...row };
     Object.assign(row, patch);
     if (!Array.isArray(row.attachments)) row.attachments = [];
+    this.dirtyIndexKeys.add(`${row.item_id}::${row.month}`);
     this.logAudit(actorId, 'UPDATE', 'item_index', row.id, oldSnap, row);
     return row;
   }
@@ -680,6 +773,7 @@ class MemoryStore {
     if (!row) return undefined;
     if (!Array.isArray(row.attachments)) row.attachments = [];
     row.attachments.push(...newAttachments);
+    this.dirtyIndexKeys.add(`${row.item_id}::${row.month}`);
     this.logAudit(actorId, 'UPDATE', 'item_index', row.id, null, { added_attachments: newAttachments.map((a) => a.original_name) });
     return row;
   }
@@ -695,6 +789,7 @@ class MemoryStore {
     const idx = row.attachments.findIndex((a) => a.id === attachmentId);
     if (idx === -1) return undefined;
     const [removed] = row.attachments.splice(idx, 1);
+    this.dirtyIndexKeys.add(`${row.item_id}::${row.month}`);
     this.logAudit(actorId, 'UPDATE', 'item_index', row.id, { removed_attachment: removed.original_name }, null);
     return removed;
   }
@@ -703,6 +798,7 @@ class MemoryStore {
     const idx = this.state.itemIndices.findIndex((r) => r.item_id === itemId && r.id === rowId);
     if (idx === -1) return false;
     const [removed] = this.state.itemIndices.splice(idx, 1);
+    this.hasDirtyDeletes = true;
     this.logAudit(actorId, 'DELETE', 'item_index', rowId, removed, null);
     return true;
   }
@@ -751,6 +847,7 @@ class MemoryStore {
       ...input,
     };
     this.state.tenders.push(row);
+    this.dirtyTenderNos.add(row.tender_no.trim().toLowerCase());
     this.logAudit(actorId, 'INSERT', 'tender_master', row.id, null, row);
     return row;
   }
@@ -760,6 +857,7 @@ class MemoryStore {
     if (!row) return undefined;
     const oldSnap = { ...row };
     Object.assign(row, patch);
+    this.dirtyTenderNos.add(row.tender_no.trim().toLowerCase());
     this.logAudit(actorId, 'UPDATE', 'tender_master', row.id, oldSnap, row);
     return row;
   }
@@ -769,6 +867,7 @@ class MemoryStore {
     if (idx === -1) return false;
     const [removed] = this.state.tenders.splice(idx, 1);
     this.state.tenderVendors = this.state.tenderVendors.filter((v) => v.tender_id !== id);
+    this.hasDirtyDeletes = true;
     this.logAudit(actorId, 'DELETE', 'tender_master', id, removed, null);
     return true;
   }
@@ -797,6 +896,7 @@ class MemoryStore {
   createTenderVendor(input: Omit<TenderVendorRecord, 'id'>, actorId: number | null = null): TenderVendorRecord {
     const row: TenderVendorRecord = { id: this.state.nextIds.tenderVendors++, ...input };
     this.state.tenderVendors.push(row);
+    this.dirtyVendorKeys.add(`${row.tender_id}::${row.vendor_name.trim().toLowerCase()}`);
     this.logAudit(actorId, 'INSERT', 'tender_vendor', row.id, null, row);
     return row;
   }
@@ -811,6 +911,7 @@ class MemoryStore {
     if (!row) return undefined;
     const oldSnap = { ...row };
     Object.assign(row, patch);
+    this.dirtyVendorKeys.add(`${row.tender_id}::${row.vendor_name.trim().toLowerCase()}`);
     this.logAudit(actorId, 'UPDATE', 'tender_vendor', row.id, oldSnap, row);
     return row;
   }
@@ -819,6 +920,7 @@ class MemoryStore {
     const idx = this.state.tenderVendors.findIndex((v) => v.tender_id === tenderId && v.id === rowId);
     if (idx === -1) return false;
     const [removed] = this.state.tenderVendors.splice(idx, 1);
+    this.hasDirtyDeletes = true;
     this.logAudit(actorId, 'DELETE', 'tender_vendor', rowId, removed, null);
     return true;
   }
@@ -844,6 +946,7 @@ class MemoryStore {
       ...input,
     };
     this.state.pvcResults.push(row);
+    this.dirtyResultIds.add(row.id);
     this.logAudit(actorId, 'INSERT', 'pvc_result', row.id, null, { id: row.id, item_id: row.item_id, fairprice: row.fairprice });
     return row;
   }
@@ -853,6 +956,7 @@ class MemoryStore {
     if (!row) return undefined;
     const oldSnap = { id: row.id, fairprice: row.fairprice, selectedscenario: row.selectedscenario };
     Object.assign(row, patch);
+    this.dirtyResultIds.add(row.id);
     this.logAudit(actorId, 'UPDATE', 'pvc_result', row.id, oldSnap, { id: row.id, fairprice: row.fairprice, selectedscenario: row.selectedscenario });
     return row;
   }

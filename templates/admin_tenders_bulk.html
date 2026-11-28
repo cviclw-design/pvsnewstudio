@@ -14,6 +14,13 @@
   </div>
 </div>
 
+<div id="cloudAuthRequiredNotice" class="alert alert-warning d-none d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3" role="alert">
+  <div><i class="bi bi-cloud-slash me-2"></i><strong>Cloud Database Not Connected</strong></div>
+  <button type="button" class="btn btn-sm btn-warning fw-semibold" data-connect-cloud-db="1">
+    <i class="bi bi-google me-1"></i>Connect Cloud DB
+  </button>
+</div>
+
 <!-- Mode Switcher -->
 <ul class="nav nav-tabs mb-4" id="bulkTenderTabs" role="tablist">
   <li class="nav-item" role="presentation">
@@ -32,7 +39,7 @@
 
   <!-- ═══ TAB 1: EXCEL / CSV UPLOAD ═══ -->
   <div class="tab-pane fade show active" id="pane-excel" role="tabpanel">
-    <form method="post" action="{{ url_for('admin.tenders_bulk_upload') }}" enctype="multipart/form-data">
+    <form method="post" action="{{ url_for('admin.tenders_bulk_upload') }}" enctype="multipart/form-data" data-cloud-sync-form="1">
       <div class="card">
         <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
           <h6 class="fw-bold mb-0"><i class="bi bi-file-earmark-arrow-up me-2 text-primary"></i>Upload Tender &amp; Vendor Workbook</h6>
@@ -85,7 +92,7 @@
 
   <!-- ═══ TAB 2: INTERACTIVE GRID & PASTE ═══ -->
   <div class="tab-pane fade" id="pane-grid" role="tabpanel">
-    <form id="bulkTenderGridForm" method="post" action="{{ url_for('admin.tenders_bulk_save') }}">
+    <form id="bulkTenderGridForm" method="post" action="{{ url_for('admin.tenders_bulk_save') }}" data-cloud-sync-form="1">
       <input type="hidden" name="rows_json" id="bulkTenderRowsJson" value="[]">
 
       <div class="card">
