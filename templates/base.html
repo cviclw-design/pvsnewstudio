@@ -141,9 +141,6 @@
       <!-- Zone 3: User Context / Auth Action -->
       <div class="d-flex align-items-center gap-2">
         {% if current_user.is_authenticated %}
-          <button type="button" id="btnConnectCloudDb" class="btn btn-sm btn-outline-light border-secondary d-none text-nowrap">
-            <i class="bi bi-cloud-arrow-up me-1"></i>Connect Cloud DB
-          </button>
           <span class="pvc-user-label">
             <i class="bi bi-person-circle text-secondary"></i>
             <span>{{ current_user.full_name or current_user.username }}</span>

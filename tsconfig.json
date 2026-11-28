@@ -12,6 +12,6 @@
     "isolatedModules": true,
     "noEmit": true
   },
-  "include": ["server.ts", "src/server/**/*.ts", "src/client/**/*.ts"],
+  "include": ["server.ts", "src/server/**/*.ts", "src/client/**/*.ts", "src/db/**/*.ts", "src/lib/**/*.ts", "src/middleware/**/*.ts"],
   "exclude": ["dist", "node_modules"]
 }

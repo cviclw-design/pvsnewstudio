@@ -11,7 +11,6 @@ import { authRouter, consumeUserFlashes } from './src/server/routes/auth.js';
 import { mainRouter } from './src/server/routes/main.js';
 import { pvcRouter } from './src/server/routes/pvc.js';
 import { adminRouter } from './src/server/routes/admin.js';
-import { syncRouter } from './src/server/routes/sync.js';
 
 declare module 'express-session' {
   interface SessionData {
@@ -96,6 +95,78 @@ app.use('/src/assets', express.static(path.join(ROOT_DIR, 'src/assets')));
 // Configure Nunjucks template engine
 configureNunjucks(app, path.join(ROOT_DIR, 'templates'));
 
+// Always-connected Cloud SQL (PostgreSQL) request lifecycle middleware:
+// 1. Lazily loads latest authoritative data from PostgreSQL on each request (no startup probes).
+// 2. Automatically commits all queued Drizzle mutations inside a PostgreSQL transaction
+//    BEFORE sending any redirect/JSON/HTML response on mutating requests.
+app.use(async (req: Request, res: Response, next: NextFunction) => {
+  if (req.path === '/healthz') {
+    next();
+    return;
+  }
+  try {
+    await store.syncFromDatabase();
+  } catch (err) {
+    console.error('[PostgreSQL Load Error]', err);
+    if (req.headers['x-pvc-ajax'] === '1' || req.path.startsWith('/api/')) {
+      res.status(503).json({ ok: false, error: 'Database is temporarily unavailable. Please try again.' });
+    } else {
+      res.status(503).send('Database is temporarily unavailable. Please refresh and try again.');
+    }
+    return;
+  }
+
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    const origRedirect = res.redirect.bind(res);
+    const origJson = res.json.bind(res);
+    const origSend = res.send.bind(res);
+    let flushed = false;
+
+    const commitThen = (proceed: () => unknown): Response => {
+      if (flushed || !store.hasPendingDbOps()) {
+        flushed = true;
+        proceed();
+        return res;
+      }
+      flushed = true;
+      store
+        .flushDbWrites()
+        .then(() => {
+          proceed();
+        })
+        .catch((err) => {
+          console.error('[PostgreSQL Commit Error]', err);
+          if (!res.headersSent) {
+            if (req.headers['x-pvc-ajax'] === '1' || req.path.startsWith('/api/')) {
+              origJson.call(res.status(500), { ok: false, error: 'Failed to save changes. Please try again.' });
+            } else {
+              origSend.call(res.status(500), 'Failed to save changes to the database. Please go back and try again.');
+            }
+          }
+        });
+      return res;
+    };
+
+    res.redirect = ((arg1: number | string, arg2?: number | string) => {
+      commitThen(() => {
+        if (typeof arg1 === 'number') {
+          origRedirect(arg1, String(arg2 || '/'));
+        } else if (typeof arg2 === 'number') {
+          origRedirect(arg2, arg1);
+        } else {
+          origRedirect(arg1);
+        }
+      });
+    }) as unknown as typeof res.redirect;
+
+    res.json = ((body?: unknown) => commitThen(() => origJson(body))) as typeof res.json;
+
+    res.send = ((body?: unknown) => commitThen(() => origSend(body))) as typeof res.send;
+  }
+
+  next();
+});
+
 // Inject template locals & resolve authenticated user (session -> signed cookie -> iframe fallback token)
 app.use((req: Request, res: Response, next: NextFunction) => {
   let userId: number | undefined = req.session?.userId;
@@ -168,7 +239,6 @@ app.use('/', authRouter);
 app.use('/', mainRouter);
 app.use('/pvc', pvcRouter);
 app.use('/admin', adminRouter);
-app.use('/api/sync', syncRouter);
 
 // Health check
 app.get('/healthz', (_req, res) => {

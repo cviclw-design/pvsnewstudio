@@ -191,7 +191,7 @@ pvcRouter.get('/calculator', requireLogin, (_req, res) => {
   res.render('index.html', { items, tenders });
 });
 
-pvcRouter.post('/calculate', requireLogin, (req, res) => {
+pvcRouter.post('/calculate', requireLogin, async (req, res) => {
   res.locals.request.endpoint = 'pvc.calculate';
   const body = req.body as Record<string, string>;
   const itemidRaw = body.itemid || body.item_id;
@@ -351,9 +351,11 @@ pvcRouter.post('/calculate', requireLogin, (req, res) => {
   let savedId: number;
   if (calc) {
     store.updatePVCResult(calc.id, recordData, currentUser.id);
+    await store.flushDbWrites();
     savedId = calc.id;
   } else {
     const created = store.createPVCResult(recordData, currentUser.id);
+    await store.flushDbWrites();
     savedId = created.id;
   }
 
